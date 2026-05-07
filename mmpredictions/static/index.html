@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MMPredictions pROAS</title>
+  <link rel="stylesheet" href="/static/dashboard.css">
+  <script src="/static/dashboard.js" defer></script>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <div class="title-block">
+        <h1>MMPredictions pROAS / pLTV</h1>
+        <div id="syncStatus" class="muted" aria-live="polite">Loading dashboard data...</div>
+      </div>
+      <div class="actions">
+        <span id="syncBadge" class="sync-badge" hidden aria-live="polite"></span>
+        <button id="refreshButton" type="button">Refresh</button>
+        <select id="scopeFilter" aria-label="Cohort scope">
+          <option value="auto">Auto scope</option>
+          <option value="day">1-day cohorts</option>
+          <option value="week" selected>7-day cohorts</option>
+          <option value="month">30-day cohorts</option>
+          <option value="custom">Custom dates</option>
+        </select>
+        <input id="dateFrom" type="date" aria-label="Date from" hidden>
+        <input id="dateTo" type="date" aria-label="Date to" hidden>
+        <select id="platformFilter" aria-label="Platform">
+          <option value="" selected>All platforms</option>
+          <option>Android</option>
+          <option>iOS</option>
+        </select>
+        <select id="countryFilter" aria-label="Country">
+          <option value="">All countries</option>
+        </select>
+        <select id="partnerFilter" aria-label="Source">
+          <option value="">All sources</option>
+        </select>
+        <select id="campaignFilter" aria-label="Campaign">
+          <option value="">All campaigns</option>
+        </select>
+        <button id="campaignExclusionsButton" class="secondary" type="button">
+          Exclude campaigns <span id="excludedCampaignCount" class="button-count"></span>
+        </button>
+        <button id="accessButton" class="secondary" type="button" hidden>Access</button>
+        <button id="resetFilters" class="secondary" type="button">Reset filters</button>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div id="statePanel" class="state-panel"></div>
+    <nav class="tabs" aria-label="Dashboard sections">
+      <div class="tab-buttons">
+        <button id="tabOverview" class="tab-button active" type="button" data-tab="overview">Overview</button>
+        <button id="tabCampaigns" class="tab-button" type="button" data-tab="campaigns">Campaigns</button>
+        <button id="tabBacktest" class="tab-button" type="button" data-tab="backtest">Backtest</button>
+        <button id="tabQuality" class="tab-button" type="button" data-tab="quality">Quality</button>
+      </div>
+      <div class="export-actions">
+        <button id="exportCsv" class="secondary" type="button">Export CSV</button>
+        <button id="exportXls" class="secondary" type="button">Export XLS</button>
+      </div>
+    </nav>
+    <section class="context-section tab-panel" data-tab-panel="overview">
+      <div class="section-head">
+        <h2>Selected Cohort</h2>
+        <span id="contextSummary" class="muted"></span>
+      </div>
+      <div id="cohortContext" class="context-grid"></div>
+    </section>
+    <section class="overview-section tab-panel" data-tab-panel="overview">
+      <div class="section-head">
+        <h2>Channel Overview</h2>
+        <span id="overviewSummary" class="muted"></span>
+      </div>
+      <div id="channelOverview" class="channel-overview"></div>
+    </section>
+    <div id="metrics" class="status tab-panel" data-tab-panel="overview"></div>
+    <div class="layout tab-panel" data-tab-panel="overview">
+      <section>
+        <h2>Predicted ROAS Curve</h2>
+        <div class="chart-wrap"><svg id="curve" viewBox="0 0 840 360" role="img" aria-label="Predicted ROAS curve"></svg></div>
+        <div id="curveNote" class="note">Bands show the 20th-80th percentile historical multiplier range for the selected traffic.</div>
+      </section>
+      <section>
+        <h2>pLTV Curve</h2>
+        <div class="chart-wrap"><svg id="ltvCurve" viewBox="0 0 840 360" role="img" aria-label="Predicted pLTV curve"></svg></div>
+        <div class="note">pLTV uses the same selected cohort and horizon curve as pROAS, divided by network installs.</div>
+      </section>
+      <section>
+        <h2>pRetention Curve</h2>
+        <div class="chart-wrap"><svg id="retentionCurve" viewBox="0 0 840 360" role="img" aria-label="Predicted retention curve"></svg></div>
+        <div class="note">pRetention predicts retained user share for the same selected cohort and traffic slice.</div>
+      </section>
+    </div>
+    <section class="table-section tab-panel" data-tab-panel="campaigns" hidden>
+      <div class="section-head">
+        <h2>Campaign Drilldown</h2>
+        <span id="pageSummary" class="muted"></span>
+      </div>
+      <div class="quality-legend" aria-label="Decision quality legend">
+        <span><i class="quality-high"></i>High</span>
+        <span><i class="quality-good"></i>Solid</span>
+        <span><i class="quality-mid"></i>Watch</span>
+        <span><i class="quality-low"></i>Low</span>
+      </div>
+      <div class="table-wrap">
+        <table id="campaignTable">
+          <caption>Predicted campaign cohort ROAS and pLTV with horizons in columns</caption>
+          <thead>
+            <tr>
+              <th data-sort="cohort_start" scope="col">Cohort</th>
+              <th data-sort="platform" scope="col">Platform</th>
+              <th data-sort="country" scope="col">Country</th>
+              <th data-sort="source" scope="col">Source</th>
+              <th data-sort="campaign" class="campaign" scope="col">Campaign</th>
+              <th data-sort="cost" class="num" scope="col">Cost</th>
+              <th data-sort="h_7" class="num" scope="col">H7</th>
+              <th data-sort="h_30" class="num" scope="col">H30</th>
+              <th data-sort="h_60" class="num" scope="col">H60</th>
+              <th data-sort="h_90" class="num" scope="col">H90</th>
+              <th data-sort="h_120" class="num" scope="col">H120</th>
+              <th data-sort="h_180" class="num" scope="col">H180</th>
+              <th data-sort="h_360" class="num" scope="col">H360</th>
+              <th data-sort="h_540" class="num" scope="col">H540</th>
+              <th data-sort="h_720" class="num" scope="col">H720</th>
+              <th data-sort="quality" scope="col">Decision quality</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <div class="pager">
+        <button id="prevPage" type="button" class="secondary">Prev</button>
+        <span id="pageStatus" class="muted"></span>
+        <button id="nextPage" type="button" class="secondary">Next</button>
+      </div>
+      <div id="cards" class="cards"></div>
+    </section>
+    <section class="backtest-section tab-panel" data-tab-panel="backtest" hidden>
+      <div class="section-head">
+        <h2>Backtest Benchmark</h2>
+        <span id="backtestSummaryText" class="muted">Not loaded</span>
+      </div>
+      <div class="backtest-note muted">
+        Baseline remains the production prediction model. Shrinkage is shown here for benchmark comparison before rollout.
+      </div>
+      <div class="table-wrap">
+        <table id="backtestSummaryTable">
+          <caption>Backtest summary by model and horizon</caption>
+          <thead>
+            <tr>
+              <th scope="col">Model</th>
+              <th scope="col">Horizon</th>
+              <th class="num" scope="col">Rows</th>
+              <th class="num" scope="col">Actual ROAS</th>
+              <th class="num" scope="col">Pred ROAS</th>
+              <th class="num" scope="col">Weighted MAPE</th>
+              <th class="num" scope="col">Median APE</th>
+              <th class="num" scope="col">Coverage</th>
+              <th class="num" scope="col">Delta vs baseline</th>
+            </tr>
+          </thead>
+          <tbody id="backtestSummaryRows"></tbody>
+        </table>
+      </div>
+      <div class="section-head sub-head">
+        <h2>Prediction Rows</h2>
+        <span id="backtestRowsSummary" class="muted"></span>
+      </div>
+      <div class="table-wrap">
+        <table id="backtestRowsTable">
+          <caption>Backtest predicted versus actual rows</caption>
+          <thead>
+            <tr>
+              <th scope="col">Model</th>
+              <th scope="col">Cohort</th>
+              <th scope="col">Platform</th>
+              <th scope="col">Country</th>
+              <th scope="col">Source</th>
+              <th scope="col">Campaign</th>
+              <th class="num" scope="col">Cost</th>
+              <th class="num" scope="col">Horizon</th>
+              <th class="num" scope="col">Actual</th>
+              <th class="num" scope="col">Predicted</th>
+              <th class="num" scope="col">APE</th>
+              <th scope="col">Group</th>
+            </tr>
+          </thead>
+          <tbody id="backtestRows"></tbody>
+        </table>
+      </div>
+      <div class="section-head sub-head">
+        <h2>pRetention Backtest</h2>
+        <span id="retentionBacktestSummaryText" class="muted"></span>
+      </div>
+      <div class="table-wrap">
+        <table id="retentionBacktestSummaryTable">
+          <caption>Backtest summary for predicted retention by horizon</caption>
+          <thead>
+            <tr>
+              <th scope="col">Model</th>
+              <th scope="col">Horizon</th>
+              <th class="num" scope="col">Rows</th>
+              <th class="num" scope="col">Actual Retention</th>
+              <th class="num" scope="col">Pred Retention</th>
+              <th class="num" scope="col">Weighted MAPE</th>
+              <th class="num" scope="col">Median APE</th>
+              <th class="num" scope="col">Coverage</th>
+            </tr>
+          </thead>
+          <tbody id="retentionBacktestSummaryRows"></tbody>
+        </table>
+      </div>
+      <div class="section-head sub-head">
+        <h2>pRetention Rows</h2>
+        <span id="retentionBacktestRowsSummary" class="muted"></span>
+      </div>
+      <div class="table-wrap">
+        <table id="retentionBacktestRowsTable">
+          <caption>Backtest predicted versus actual retention rows</caption>
+          <thead>
+            <tr>
+              <th scope="col">Cohort</th>
+              <th scope="col">Platform</th>
+              <th scope="col">Country</th>
+              <th scope="col">Source</th>
+              <th scope="col">Campaign</th>
+              <th class="num" scope="col">Installs</th>
+              <th class="num" scope="col">Horizon</th>
+              <th class="num" scope="col">Actual</th>
+              <th class="num" scope="col">Predicted</th>
+              <th class="num" scope="col">APE</th>
+              <th scope="col">Group</th>
+            </tr>
+          </thead>
+          <tbody id="retentionBacktestRows"></tbody>
+        </table>
+      </div>
+    </section>
+    <section class="quality-section tab-panel" data-tab-panel="quality" hidden>
+      <h2>Model Quality</h2>
+      <div class="chart-wrap chart-scroll"><svg id="quality" viewBox="0 0 840 320" role="img" aria-label="Model error by horizon"></svg></div>
+      <div class="note">Error is median absolute percentage error from historical backtest cohorts used by the multiplier model.</div>
+    </section>
+  </main>
+  <div id="accessModal" class="modal" hidden>
+    <section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="accessTitle">
+      <div class="section-head">
+        <h2 id="accessTitle">Access Settings</h2>
+        <button id="closeAccess" class="secondary" type="button">Close</button>
+      </div>
+      <form id="accessForm" class="access-form">
+        <input id="accessEmail" type="email" placeholder="email@company.com" aria-label="User email" required>
+        <select id="accessRole" aria-label="Access role">
+          <option value="user">User</option>
+          <option value="admin">Admin</option>
+        </select>
+        <button type="submit">Add user</button>
+      </form>
+      <div id="accessMessage" class="muted" aria-live="polite"></div>
+      <div class="access-list-wrap">
+        <table class="access-list">
+          <thead>
+            <tr><th>Email</th><th>Role</th></tr>
+          </thead>
+          <tbody id="accessRows"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+  <div id="campaignExclusionModal" class="modal" hidden>
+    <section class="modal-panel exclusion-panel" role="dialog" aria-modal="true" aria-labelledby="campaignExclusionTitle">
+      <div class="section-head">
+        <h2 id="campaignExclusionTitle">Campaign Exclusions</h2>
+        <button id="closeCampaignExclusions" class="secondary" type="button">Close</button>
+      </div>
+      <div class="exclusion-toolbar">
+        <input id="campaignExclusionSearch" type="search" placeholder="Search campaigns" aria-label="Search campaigns">
+        <button id="clearCampaignExclusions" class="secondary" type="button">Clear exclusions</button>
+      </div>
+      <div class="exclusion-summary muted" id="campaignExclusionSummary"></div>
+      <div id="campaignExclusionList" class="exclusion-list"></div>
+    </section>
+  </div>
+</body>
+</html>

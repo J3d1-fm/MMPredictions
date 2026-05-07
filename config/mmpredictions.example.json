@@ -1,0 +1,212 @@
+{
+  "timezone": "Asia/Dubai",
+  "database_path": "/tmp/mmpredictions.sqlite3",
+  "sync": {
+    "lookback_weeks": 156,
+    "bootstrap_weeks": 52,
+    "recent_days": 21,
+    "daily_refresh_days": 3,
+    "recent_weeks": 10,
+    "weekly_refresh_weeks": 8,
+    "maturity_refresh_days": [
+      7,
+      30,
+      60,
+      90,
+      120,
+      180,
+      360,
+      540,
+      720
+    ],
+    "minimum_cost": 20.0,
+    "minimum_anchor_roas": 0.001,
+    "minimum_training_samples": 5,
+    "minimum_network_installs": 10,
+    "minimum_predicted_revenue": 20.0,
+    "revenue_definition": "all_revenue",
+    "pltv_denominator": "network_installs",
+    "google_ads_source_of_truth": "google_ads_api",
+    "excluded_sources": []
+  },
+  "storage": {
+    "gcs_bucket": "",
+    "gcs_prefix": "mmpredictions",
+    "artifact_scopes": [
+      "week",
+      "day",
+      "month"
+    ]
+  },
+  "backtest": {
+    "models": [
+      "baseline_multiplier_v1",
+      "shrinkage_multiplier_v1"
+    ],
+    "max_cohorts": 2500,
+    "max_rows": 20000
+  },
+  "shrinkage": {
+    "prior_strength": {
+      "global": 0,
+      "platform": 40,
+      "country": 32,
+      "channel": 24,
+      "channel_country": 18,
+      "campaign": 12,
+      "campaign_country": 8
+    }
+  },
+  "confidence": {
+    "weights": {
+      "network_installs": 0.22,
+      "predicted_revenue": 0.18,
+      "training_samples": 0.24,
+      "historical_error": 0.22,
+      "interval_width": 0.14
+    },
+    "thresholds": {
+      "high": 0.72,
+      "medium": 0.48
+    },
+    "missing_error_score": 0.35
+  },
+  "adjust": {
+    "api_token_env": "ADJUST_API_TOKEN",
+    "app_tokens": [
+      "android_adjust_app_token",
+      "ios_adjust_app_token"
+    ],
+    "app_token_labels": {
+      "android_adjust_app_token": "Sample Android App",
+      "ios_adjust_app_token": "Sample iOS App"
+    },
+    "ad_spend_mode": "network",
+    "dimensions": [
+      "app",
+      "country",
+      "country_code",
+      "partner_name",
+      "campaign_network",
+      "campaign_id_network"
+    ],
+    "metrics": [
+      "installs",
+      "network_installs",
+      "network_cost",
+      "network_ecpi",
+      "roas_d0",
+      "roas_d1",
+      "roas_d3",
+      "roas_d7",
+      "roas_d30",
+      "roas_d60",
+      "roas_d90",
+      "roas_d120",
+      "roas_m3",
+      "roas_m4",
+      "roas_m6",
+      "roas_m12",
+      "roas_m18",
+      "roas_m24",
+      "revenue_d7",
+      "revenue_d30",
+      "cohort_size_d1",
+      "retained_users_d1",
+      "cohort_size_d3",
+      "retained_users_d3",
+      "cohort_size_d7",
+      "retained_users_d7",
+      "cohort_size_d14",
+      "retained_users_d14",
+      "cohort_size_d30",
+      "retained_users_d30",
+      "cohort_size_d60",
+      "retained_users_d60",
+      "cohort_size_d90",
+      "retained_users_d90",
+      "cohort_size_d120",
+      "retained_users_d120",
+      "cohort_size_m6",
+      "retained_users_m6",
+      "cohort_size_m12",
+      "retained_users_m12",
+      "cohort_size_m18",
+      "retained_users_m18",
+      "cohort_size_m24",
+      "retained_users_m24"
+    ]
+  },
+  "retention": {
+    "enabled": true,
+    "anchors": [
+      1,
+      3,
+      7
+    ],
+    "horizons": [
+      7,
+      30,
+      60,
+      90,
+      120,
+      180,
+      360,
+      540,
+      720
+    ],
+    "horizon_metric_map": {
+      "7": "retention_d7",
+      "30": "retention_d30",
+      "60": "retention_d60",
+      "90": "retention_d90",
+      "120": "retention_d120",
+      "180": "retention_m6",
+      "360": "retention_m12",
+      "540": "retention_m18",
+      "720": "retention_m24"
+    },
+    "metric_labels": {
+      "retention_m6": "M6 proxy for D180",
+      "retention_m12": "M12 proxy for D360",
+      "retention_m18": "M18 proxy for D540",
+      "retention_m24": "M24 proxy for D720"
+    }
+  },
+  "prediction": {
+    "anchors": [
+      0,
+      1,
+      3,
+      7
+    ],
+    "horizons": [
+      7,
+      30,
+      60,
+      90,
+      120,
+      180,
+      360,
+      540,
+      720
+    ],
+    "horizon_metric_map": {
+      "7": "roas_d7",
+      "30": "roas_d30",
+      "60": "roas_d60",
+      "90": "roas_d90",
+      "120": "roas_d120",
+      "180": "roas_m6",
+      "360": "roas_m12",
+      "540": "roas_m18",
+      "720": "roas_m24"
+    },
+    "metric_labels": {
+      "roas_m6": "M6 proxy for D180",
+      "roas_m12": "M12 proxy for D360",
+      "roas_m18": "M18 proxy for D540",
+      "roas_m24": "M24 proxy for D720"
+    }
+  }
+}
