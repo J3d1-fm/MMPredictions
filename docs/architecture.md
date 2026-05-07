@@ -55,6 +55,19 @@ The dashboard reads compact summary artifacts where possible:
 
 Cloud Storage can act as a low-cost persistent store for Cloud Run deployments. SQLite remains a single-writer store; move to Cloud SQL or BigQuery when concurrent writes, BI access, or large multi-tenant workloads become important.
 
+## Multi-Project Registry
+
+The dashboard can serve multiple projects from one deployment. The registry lives in Cloud Storage at `projects/registry.json` when `MMPRED_GCS_BUCKET` is set, or at `MMPRED_PROJECTS_PATH` / the database directory for local deployments.
+
+Each project has:
+
+- independent MMP connector metadata;
+- independent Google Ads connector metadata;
+- independent SQLite path derived from the base DB path;
+- independent Cloud Storage prefix derived from the base prefix.
+
+Browser requests pass `project_id` to `/api/summary`, `/api/status`, `/api/backtest`, and sync endpoints. This keeps UI project switching cheap and prevents project data from mixing in compact artifacts.
+
 ## Data Safety Rules
 
 - Never store API tokens in Git.

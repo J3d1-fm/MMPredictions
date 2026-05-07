@@ -6,6 +6,7 @@ let statusTimer = null;
 let latestSyncStamp = null;
 let loadPromise = null;
 let accessState = null;
+let projectsState = {projects: [], active_project_id: "default"};
 let activeTab = "overview";
 let backtestState = null;
 let backtestPromise = null;
@@ -19,6 +20,7 @@ const columnWidthsKey = "mmpredictions-column-widths-v1";
 const activeTabKey = "mmpredictions-active-tab-v1";
 const backtestCacheKey = "mmpredictions-backtest-v1";
 const campaignExclusionsKey = "mmpredictions-campaign-exclusions-v1";
+const projectPreferenceKey = "mmpredictions-project-v1";
 const summaryCacheMaxAgeMs = 24 * 60 * 60 * 1000;
 let excludedCampaignSet = new Set();
 
@@ -54,6 +56,7 @@ const scopeLabel = value => ({
 
 function selected() {
   return {
+    projectId: document.getElementById("projectFilter").value || "default",
     scope: document.getElementById("scopeFilter").value,
     dateFrom: document.getElementById("dateFrom").value,
     dateTo: document.getElementById("dateTo").value,
@@ -67,7 +70,7 @@ function selected() {
 function writeHash() {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(selected())) {
-    if (value) params.set(key === "partner" ? "source" : key, value);
+    if (value) params.set(key === "partner" ? "source" : key === "projectId" ? "project_id" : key, value);
   }
   savePreferences();
   history.replaceState(null, "", `${location.pathname}${location.search}${params.toString() ? `#${params}` : ""}`);
@@ -127,6 +130,7 @@ function readPreferences() {
       country: "countryFilter",
       partner: "partnerFilter",
       campaign: "campaignFilter",
+      projectId: "projectFilter",
       dateFrom: "dateFrom",
       dateTo: "dateTo"
     };
@@ -161,12 +165,18 @@ function readHash() {
   if (params.get("scope")) document.getElementById("scopeFilter").value = params.get("scope");
   if (params.get("dateFrom") || params.get("date_from")) document.getElementById("dateFrom").value = params.get("dateFrom") || params.get("date_from");
   if (params.get("dateTo") || params.get("date_to")) document.getElementById("dateTo").value = params.get("dateTo") || params.get("date_to");
+  if (params.get("project_id")) {
+    const control = document.getElementById("projectFilter");
+    control.value = params.get("project_id");
+    control.dataset.pendingValue = params.get("project_id");
+  }
 }
 
 function summaryParams() {
   const f = selected();
   const params = new URLSearchParams();
   params.set("seed", "0");
+  params.set("project_id", f.projectId || "default");
   if (f.scope) params.set("scope", f.scope);
   if (f.scope === "custom") {
     if (f.dateFrom) params.set("date_from", f.dateFrom);
@@ -199,7 +209,7 @@ function writeSummaryCache(key, payload) {
 }
 
 function readBacktestCache() {
-  const raw = safeStorageGet(backtestCacheKey);
+  const raw = safeStorageGet(`${backtestCacheKey}:${selected().projectId || "default"}`);
   if (!raw) return null;
   try {
     const cached = JSON.parse(raw);
@@ -211,7 +221,7 @@ function readBacktestCache() {
 }
 
 function writeBacktestCache(payload) {
-  safeStorageSet(backtestCacheKey, JSON.stringify({savedAt: Date.now(), payload}));
+  safeStorageSet(`${backtestCacheKey}:${selected().projectId || "default"}`, JSON.stringify({savedAt: Date.now(), payload}));
 }
 
 function setActiveTab(tab) {
@@ -226,21 +236,29 @@ function setActiveTab(tab) {
   });
   safeStorageSet(activeTabKey, activeTab);
   if (activeTab === "backtest") loadBacktest().catch(err => renderBacktestError(err.message));
+  if (activeTab === "connectors") renderProjects();
 }
 
 function readActiveTab() {
   const saved = safeStorageGet(activeTabKey);
-  if (saved && ["overview", "campaigns", "backtest", "quality"].includes(saved)) activeTab = saved;
+  if (saved && ["overview", "campaigns", "connectors", "backtest", "quality"].includes(saved)) activeTab = saved;
 }
 
 function renderAccess() {
   const button = document.getElementById("accessButton");
+  const connectorsButton = document.getElementById("connectorsButton");
+  const connectorsTab = document.getElementById("tabConnectors");
   const rows = document.getElementById("accessRows");
   if (!accessState || !accessState.is_admin) {
     button.hidden = true;
+    connectorsButton.hidden = true;
+    connectorsTab.hidden = true;
+    if (activeTab === "connectors") setActiveTab("overview");
     return;
   }
   button.hidden = false;
+  connectorsButton.hidden = false;
+  connectorsTab.hidden = false;
   rows.innerHTML = (accessState.users || []).map(user => `
     <tr>
       <td>${esc(user.email)}</td>
@@ -258,7 +276,131 @@ async function loadAccess() {
     renderAccess();
   } catch (_err) {
     document.getElementById("accessButton").hidden = true;
+    document.getElementById("connectorsButton").hidden = true;
+    document.getElementById("tabConnectors").hidden = true;
   }
+}
+
+function currentProject() {
+  const id = selected().projectId || projectsState.active_project_id || "default";
+  return (projectsState.projects || []).find(project => project.id === id) || (projectsState.projects || [])[0] || {id: "default", name: "Default project"};
+}
+
+function renderProjectSelector() {
+  const select = document.getElementById("projectFilter");
+  const projects = projectsState.projects || [];
+  const pending = select.dataset.pendingValue || safeStorageGet(projectPreferenceKey) || projectsState.active_project_id || "default";
+  select.innerHTML = projects.map(project => `<option value="${esc(project.id)}">${esc(project.name)}</option>`).join("") || `<option value="default">Default project</option>`;
+  select.value = projects.some(project => project.id === pending) ? pending : (projectsState.active_project_id || projects[0]?.id || "default");
+  select.hidden = projects.length <= 1;
+  delete select.dataset.pendingValue;
+}
+
+function connectorPill(text) {
+  return `<span class="proxy-pill">${esc(text)}</span>`;
+}
+
+function renderProjects() {
+  const projects = projectsState.projects || [];
+  document.getElementById("projectSummary").textContent = `${projects.length} project${projects.length === 1 ? "" : "s"}`;
+  document.getElementById("projectCards").innerHTML = projects.map(project => {
+    const active = project.id === selected().projectId;
+    const google = project.google_ads_configured ? `Google Ads: ${project.google_ads_customer_ids?.length || 0} customer ids` : "Google Ads: not connected";
+    return `<article class="project-card">
+      <div>
+        <h3>${esc(project.name)}${active ? " · active" : ""}</h3>
+        <div class="muted">${esc(project.id)} · MMP ${esc(project.mmp_provider)} · token env ${esc(project.mmp_api_token_env)}</div>
+        <div class="project-meta">
+          ${connectorPill(`${project.app_token_count || 0} app tokens`)}
+          ${connectorPill(google)}
+        </div>
+      </div>
+      <div class="project-actions">
+        <button type="button" class="secondary project-select" data-project="${esc(project.id)}">Select</button>
+        <button type="button" class="secondary project-edit" data-project="${esc(project.id)}">Edit</button>
+        <button type="button" class="project-sync" data-project="${esc(project.id)}" data-mode="daily">Sync daily</button>
+        <button type="button" class="secondary project-sync" data-project="${esc(project.id)}" data-mode="weekly">Sync weekly</button>
+      </div>
+    </article>`;
+  }).join("");
+}
+
+async function loadProjects() {
+  const res = await fetch("/api/projects", {cache: "no-store"});
+  const payload = await res.json();
+  if (!res.ok) throw new Error(payload.error || "Projects API error");
+  projectsState = payload;
+  renderProjectSelector();
+  renderProjects();
+}
+
+function openProjectModal(project = null, googleFocus = false) {
+  const modal = document.getElementById("projectModal");
+  const current = project || {};
+  document.getElementById("projectModalTitle").textContent = project ? "Edit Project Connector" : googleFocus ? "Connect Google Ads" : "Connect MMP API";
+  document.getElementById("projectIdInput").value = current.id || "";
+  document.getElementById("projectIdInput").disabled = Boolean(project);
+  document.getElementById("projectNameInput").value = current.name || "";
+  document.getElementById("mmpProviderInput").value = current.mmp_provider || "adjust";
+  document.getElementById("mmpTokenEnvInput").value = current.mmp_api_token_env || "ADJUST_API_TOKEN";
+  document.getElementById("mmpAppTokensInput").value = (current.app_tokens || []).join(",");
+  document.getElementById("mmpLabelsInput").value = current.app_token_labels ? JSON.stringify(current.app_token_labels) : "";
+  document.getElementById("googleEnabledInput").checked = Boolean(current.google_ads_enabled || googleFocus);
+  document.getElementById("googleConfigPathInput").value = current.google_ads_config_path || "";
+  document.getElementById("googleCustomerIdsInput").value = (current.google_ads_customer_ids || []).join(",");
+  document.getElementById("projectMessage").textContent = "";
+  modal.hidden = false;
+  document.getElementById(googleFocus ? "googleConfigPathInput" : "projectIdInput").focus();
+}
+
+async function saveProject(event) {
+  event.preventDefault();
+  const message = document.getElementById("projectMessage");
+  message.textContent = "Saving project...";
+  try {
+    let labels = {};
+    const labelsRaw = document.getElementById("mmpLabelsInput").value.trim();
+    if (labelsRaw) labels = JSON.parse(labelsRaw);
+    const payload = {
+      id: document.getElementById("projectIdInput").value.trim(),
+      name: document.getElementById("projectNameInput").value.trim(),
+      mmp_provider: document.getElementById("mmpProviderInput").value,
+      mmp_api_token_env: document.getElementById("mmpTokenEnvInput").value.trim() || "ADJUST_API_TOKEN",
+      app_tokens: document.getElementById("mmpAppTokensInput").value.split(",").map(value => value.trim()).filter(Boolean),
+      app_token_labels: labels,
+      google_ads_enabled: document.getElementById("googleEnabledInput").checked,
+      google_ads_config_path: document.getElementById("googleConfigPathInput").value.trim(),
+      google_ads_customer_ids: document.getElementById("googleCustomerIdsInput").value.split(",").map(value => value.trim()).filter(Boolean)
+    };
+    const res = await fetch("/api/projects", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload)
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.detail || result.error || "Project API error");
+    projectsState = result;
+    renderProjectSelector();
+    document.getElementById("projectFilter").value = payload.id;
+    safeStorageSet(projectPreferenceKey, payload.id);
+    document.getElementById("projectModal").hidden = true;
+    renderProjects();
+    await load(true);
+  } catch (err) {
+    message.textContent = err.message;
+  }
+}
+
+async function syncProject(projectId, mode) {
+  const res = await fetch("/api/projects/sync", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({project_id: projectId, mode, days: 3, weeks: mode === "weekly" ? 8 : null})
+  });
+  const payload = await res.json();
+  if (!res.ok) throw new Error(payload.detail || payload.error || "Sync failed");
+  latestSyncStamp = null;
+  await load(true);
 }
 
 async function addAccessUser(event) {
@@ -1079,7 +1221,8 @@ async function loadBacktest(force = false) {
     } else {
       document.getElementById("backtestSummaryText").textContent = "Loading backtest...";
     }
-    const res = await fetch("/api/backtest", {cache: "no-store"});
+    const params = new URLSearchParams({project_id: selected().projectId || "default"});
+    const res = await fetch(`/api/backtest?${params}`, {cache: "no-store"});
     const payload = await res.json();
     if (!res.ok) throw new Error(payload.error || "Backtest API error");
     backtestState = payload;
@@ -1313,7 +1456,8 @@ async function load(force = false) {
 
 async function pollStatus() {
   try {
-    const res = await fetch("/api/status");
+    const params = new URLSearchParams({project_id: selected().projectId || "default"});
+    const res = await fetch(`/api/status?${params}`);
     if (!res.ok) return;
     const payload = await res.json();
     const badge = document.getElementById("syncBadge");
@@ -1550,6 +1694,46 @@ document.getElementById("refreshButton").addEventListener("click", () => {
   if (activeTab === "backtest") loadBacktest(true).catch(err => renderBacktestError(err.message));
   else load(true).catch(err => setView("error", err.message));
 });
+document.getElementById("projectFilter").addEventListener("change", () => {
+  safeStorageSet(projectPreferenceKey, selected().projectId || "default");
+  state = null;
+  backtestState = null;
+  latestSyncStamp = null;
+  page = 1;
+  writeHash();
+  load(true).catch(err => setView("error", err.message));
+  if (activeTab === "backtest") loadBacktest(true).catch(err => renderBacktestError(err.message));
+});
+document.getElementById("connectorsButton").addEventListener("click", () => setActiveTab("connectors"));
+document.getElementById("addMmpProject").addEventListener("click", () => openProjectModal(null, false));
+document.getElementById("addGoogleProject").addEventListener("click", () => openProjectModal(currentProject(), true));
+document.getElementById("closeProjectModal").addEventListener("click", () => {
+  document.getElementById("projectModal").hidden = true;
+});
+document.getElementById("projectModal").addEventListener("click", event => {
+  if (event.target.id === "projectModal") document.getElementById("projectModal").hidden = true;
+});
+document.getElementById("projectForm").addEventListener("submit", saveProject);
+document.getElementById("projectCards").addEventListener("click", event => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  const projectId = button.dataset.project;
+  if (button.classList.contains("project-select")) {
+    document.getElementById("projectFilter").value = projectId;
+    document.getElementById("projectFilter").dispatchEvent(new Event("change"));
+  } else if (button.classList.contains("project-edit")) {
+    openProjectModal((projectsState.projects || []).find(project => project.id === projectId), false);
+  } else if (button.classList.contains("project-sync")) {
+    button.disabled = true;
+    button.textContent = "Syncing...";
+    syncProject(projectId, button.dataset.mode)
+      .catch(err => { document.getElementById("projectMessage").textContent = err.message; })
+      .finally(() => {
+        button.disabled = false;
+        renderProjects();
+      });
+  }
+});
 document.getElementById("accessButton").addEventListener("click", () => {
   document.getElementById("accessModal").hidden = false;
   document.getElementById("accessEmail").focus();
@@ -1672,7 +1856,13 @@ readHash();
 readActiveTab();
 setActiveTab(activeTab);
 updateDateInputs();
-load().catch(err => setView("error", err.message));
-loadAccess();
-statusTimer = setInterval(pollStatus, 15000);
-pollStatus();
+loadProjects()
+  .catch(err => {
+    document.getElementById("projectSummary").textContent = err.message;
+  })
+  .finally(() => {
+    load().catch(err => setView("error", err.message));
+    loadAccess();
+    statusTimer = setInterval(pollStatus, 15000);
+    pollStatus();
+  });

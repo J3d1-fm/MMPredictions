@@ -34,6 +34,8 @@ MMPRED_IAP_RESOURCE=projects/PROJECT_NUMBER/iap_web/cloud_run-REGION/services/SE
 
 Use one writer instance for SQLite. If you need concurrent writes or direct analyst access, move the store to Cloud SQL Postgres or BigQuery partitioned tables.
 
+For multi-project deployments, set `MMPRED_GCS_BUCKET`. The project registry and per-project artifacts will be stored under the configured Cloud Storage prefix. If Cloud Storage is not enabled, set `MMPRED_PROJECTS_PATH` to a writable JSON path.
+
 ## Scheduler
 
 Use `/api/sync` with `X-Sync-Token`.

@@ -1,4 +1,8 @@
 {
+  "project": {
+    "id": "default",
+    "name": "Default project"
+  },
   "timezone": "Asia/Dubai",
   "database_path": "/tmp/mmpredictions.sqlite3",
   "sync": {

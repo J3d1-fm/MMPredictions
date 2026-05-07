@@ -40,6 +40,8 @@ def bucket_name(config: dict[str, Any]) -> str | None:
 
 
 def prefix(config: dict[str, Any]) -> str:
+    if config.get("_gcs_prefix_override"):
+        return str(config["_gcs_prefix_override"]).strip("/")
     storage = config.get("storage", {})
     raw = os.environ.get("MMPRED_GCS_PREFIX") or storage.get("gcs_prefix") or "mmpredictions"
     return str(raw).strip("/")

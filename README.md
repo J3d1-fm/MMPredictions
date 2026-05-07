@@ -11,6 +11,7 @@ MMPredictions lets app teams connect their own MMP cohort API credentials, optio
 - Builds pROAS, pLTV, and pRetention forecasts for configurable horizons.
 - Labels mature values as `actual` and forecasted values as `pred`.
 - Supports campaign/source/country/platform filters, campaign exclusions, CSV/XLS exports, and model backtests.
+- Lets admins manage multiple projects and connector metadata from the dashboard UI.
 - Persists compact dashboard artifacts so the UI reads small payloads instead of recomputing full history.
 - Can run locally, in Docker, or on Google Cloud Run with IAP.
 
@@ -66,6 +67,25 @@ Edit `config/mmpredictions.json` or use environment variables:
 - `MMPRED_GCS_PREFIX`: optional object prefix.
 - `MMPRED_ADMIN_EMAILS`: bootstrap dashboard admins when using IAP.
 - `MMPRED_IAP_RESOURCE`: IAP resource path for access-management UI.
+- `MMPRED_PROJECTS_PATH`: optional local project registry path when Cloud Storage is not enabled.
+
+## Multi-Project Connectors
+
+Admins can open `Connectors` in the dashboard to add projects for different apps or publishers. Each project can define:
+
+- MMP provider.
+- MMP API token environment variable name.
+- MMP app tokens and labels.
+- Google Ads config path and customer ids.
+
+The registry stores connector metadata only. Raw API secrets should stay in environment variables, Secret Manager, or another secret store. Each project gets its own SQLite database path and Cloud Storage artifact prefix, so selecting another project does not mix cohorts or predictions.
+
+Admin users can trigger small MMP syncs from the project cards:
+
+- `Sync daily`: recent closed daily cohorts.
+- `Sync weekly`: recent weekly cohorts.
+
+Google Ads connector metadata is stored now; production Google Ads ingestion should normalize Google campaign rows into a separate source-of-truth table before joining it into predictions.
 
 ## Google Ads
 

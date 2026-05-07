@@ -236,6 +236,8 @@ def validate_config(config: dict[str, Any]) -> None:
 
 
 def database_path(config: dict[str, Any]) -> pathlib.Path:
+    if config.get("_database_path_override"):
+        return pathlib.Path(str(config["_database_path_override"]))
     return pathlib.Path(os.environ.get("MMPRED_DB_PATH", config.get("database_path", "/tmp/mmpredictions.sqlite3")))
 
 

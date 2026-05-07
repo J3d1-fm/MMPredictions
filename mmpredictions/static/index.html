@@ -17,6 +17,9 @@
       <div class="actions">
         <span id="syncBadge" class="sync-badge" hidden aria-live="polite"></span>
         <button id="refreshButton" type="button">Refresh</button>
+        <select id="projectFilter" aria-label="Project" hidden>
+          <option value="default">Default project</option>
+        </select>
         <select id="scopeFilter" aria-label="Cohort scope">
           <option value="auto">Auto scope</option>
           <option value="day">1-day cohorts</option>
@@ -43,6 +46,7 @@
         <button id="campaignExclusionsButton" class="secondary" type="button">
           Exclude campaigns <span id="excludedCampaignCount" class="button-count"></span>
         </button>
+        <button id="connectorsButton" class="secondary" type="button" hidden>Connectors</button>
         <button id="accessButton" class="secondary" type="button" hidden>Access</button>
         <button id="resetFilters" class="secondary" type="button">Reset filters</button>
       </div>
@@ -54,6 +58,7 @@
       <div class="tab-buttons">
         <button id="tabOverview" class="tab-button active" type="button" data-tab="overview">Overview</button>
         <button id="tabCampaigns" class="tab-button" type="button" data-tab="campaigns">Campaigns</button>
+        <button id="tabConnectors" class="tab-button" type="button" data-tab="connectors" hidden>Connectors</button>
         <button id="tabBacktest" class="tab-button" type="button" data-tab="backtest">Backtest</button>
         <button id="tabQuality" class="tab-button" type="button" data-tab="quality">Quality</button>
       </div>
@@ -137,6 +142,17 @@
         <button id="nextPage" type="button" class="secondary">Next</button>
       </div>
       <div id="cards" class="cards"></div>
+    </section>
+    <section class="connectors-section tab-panel" data-tab-panel="connectors" hidden>
+      <div class="section-head">
+        <h2>Project Connectors</h2>
+        <span id="projectSummary" class="muted"></span>
+      </div>
+      <div class="connector-actions">
+        <button id="addMmpProject" type="button">Connect MMP API</button>
+        <button id="addGoogleProject" class="secondary" type="button">Connect Google Ads</button>
+      </div>
+      <div id="projectCards" class="project-cards"></div>
     </section>
     <section class="backtest-section tab-panel" data-tab-panel="backtest" hidden>
       <div class="section-head">
@@ -268,6 +284,60 @@
           <tbody id="accessRows"></tbody>
         </table>
       </div>
+    </section>
+  </div>
+  <div id="projectModal" class="modal" hidden>
+    <section class="modal-panel connector-panel" role="dialog" aria-modal="true" aria-labelledby="projectModalTitle">
+      <div class="section-head">
+        <h2 id="projectModalTitle">Project Connector</h2>
+        <button id="closeProjectModal" class="secondary" type="button">Close</button>
+      </div>
+      <form id="projectForm" class="connector-form">
+        <label>
+          Project id
+          <input id="projectIdInput" type="text" placeholder="my-app" required>
+        </label>
+        <label>
+          Project name
+          <input id="projectNameInput" type="text" placeholder="My App" required>
+        </label>
+        <label>
+          MMP provider
+          <select id="mmpProviderInput">
+            <option value="adjust">Adjust</option>
+            <option value="custom">Custom API adapter</option>
+          </select>
+        </label>
+        <label>
+          MMP API token env var
+          <input id="mmpTokenEnvInput" type="text" placeholder="ADJUST_API_TOKEN">
+        </label>
+        <label class="wide">
+          MMP app tokens
+          <input id="mmpAppTokensInput" type="text" placeholder="android_token,ios_token">
+        </label>
+        <label class="wide">
+          App token labels JSON
+          <input id="mmpLabelsInput" type="text" placeholder='{"android_token":"Android","ios_token":"iOS"}'>
+        </label>
+        <label>
+          <span>Google Ads enabled</span>
+          <input id="googleEnabledInput" type="checkbox">
+        </label>
+        <label>
+          Google Ads config path
+          <input id="googleConfigPathInput" type="text" placeholder="~/.google-ads.yaml">
+        </label>
+        <label class="wide">
+          Google Ads customer ids
+          <input id="googleCustomerIdsInput" type="text" placeholder="1234567890,0987654321">
+        </label>
+        <button type="submit">Save project</button>
+      </form>
+      <div class="connector-note muted">
+        Store API tokens in environment variables or your secret manager. This UI stores env var names and connector metadata, not raw API secrets.
+      </div>
+      <div id="projectMessage" class="muted" aria-live="polite"></div>
     </section>
   </div>
   <div id="campaignExclusionModal" class="modal" hidden>

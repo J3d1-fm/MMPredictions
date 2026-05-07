@@ -84,3 +84,13 @@ For hosted deployments:
 - Users authorize Google access outside the dashboard through their own OAuth/IAM setup.
 - API tokens and refresh tokens should live in a secret manager.
 - The dashboard should receive only the normalized reporting data and never expose raw credentials to the browser.
+
+## Dashboard Connector UI
+
+Admins can use the dashboard `Connectors` section to create or update project connector metadata:
+
+- `Connect MMP API` adds a project with MMP provider, token env var name, app tokens, and app labels.
+- `Connect Google Ads` records Google Ads config path and customer ids for the selected project.
+- `Sync daily` and `Sync weekly` trigger MMP ingestion for that project without exposing `MMPRED_SYNC_TOKEN` to the browser.
+
+The UI intentionally does not store raw API tokens. Put secrets in environment variables or Secret Manager, then reference those env var names from the project settings.

@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import datetime as dt
+import copy
 import email.utils
 import hmac
 import json
 import mimetypes
 import os
 import pathlib
+import re
 import threading
 import time
 import traceback
@@ -35,6 +37,9 @@ IAP_RESOURCE = os.environ.get("MMPRED_IAP_RESOURCE", "")
 IAP_ACCESS_ROLE = "roles/iap.httpsResourceAccessor"
 IAP_POLICY_LOCK = threading.Lock()
 ADMIN_STORE_PATH = "access/admins.json"
+PROJECT_STORE_PATH = "projects/registry.json"
+PROJECTS_LOCK = threading.Lock()
+PROJECT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,62}$")
 
 SYNC_LOCK = threading.Lock()
 SEED_TRIGGER_LOCK = threading.Lock()
@@ -206,15 +211,222 @@ def log_event(event: str, **fields: object) -> None:
     )
 
 
+def project_store_file() -> pathlib.Path:
+    configured = os.environ.get("MMPRED_PROJECTS_PATH")
+    if configured:
+        return pathlib.Path(configured).expanduser()
+    base = engine.database_path(CONFIG).parent
+    return base / "projects.json"
+
+
+def default_project() -> dict[str, object]:
+    project = CONFIG.get("project", {}) if isinstance(CONFIG.get("project"), dict) else {}
+    adjust = CONFIG.get("adjust", {})
+    storage = CONFIG.get("storage", {})
+    return {
+        "id": str(project.get("id") or "default"),
+        "name": str(project.get("name") or "Default project"),
+        "mmp_provider": str(adjust.get("provider") or "adjust"),
+        "mmp_api_token_env": str(adjust.get("api_token_env") or "ADJUST_API_TOKEN"),
+        "app_tokens": [str(token) for token in adjust.get("app_tokens", [])],
+        "app_token_labels": dict(adjust.get("app_token_labels", {})),
+        "google_ads_enabled": False,
+        "google_ads_config_path": "",
+        "google_ads_customer_ids": [],
+        "database_path": str(CONFIG.get("database_path") or ""),
+        "gcs_prefix": str(storage.get("gcs_prefix") or "mmpredictions"),
+        "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+    }
+
+
+def sanitize_project(raw: dict[str, object], existing_id: str | None = None) -> dict[str, object]:
+    project_id = str(raw.get("id") or existing_id or "").strip().lower()
+    project_id = re.sub(r"[^a-z0-9_-]+", "-", project_id).strip("-_")
+    if not PROJECT_ID_RE.match(project_id):
+        raise ValueError("project id must be 2-63 chars: lowercase letters, digits, _ or -")
+    name = str(raw.get("name") or project_id).strip()
+    if not name:
+        raise ValueError("project name is required")
+    provider = str(raw.get("mmp_provider") or "adjust").strip().lower()
+    if provider not in {"adjust", "custom"}:
+        raise ValueError("mmp_provider must be adjust or custom")
+    token_env = str(raw.get("mmp_api_token_env") or "ADJUST_API_TOKEN").strip()
+    if not re.match(r"^[A-Z_][A-Z0-9_]*$", token_env):
+        raise ValueError("MMP token env var must look like ADJUST_API_TOKEN")
+    app_tokens_raw = raw.get("app_tokens", [])
+    if isinstance(app_tokens_raw, str):
+        app_tokens = [item.strip() for item in app_tokens_raw.split(",") if item.strip()]
+    else:
+        app_tokens = [str(item).strip() for item in app_tokens_raw if str(item).strip()]  # type: ignore[union-attr]
+    labels = raw.get("app_token_labels", {})
+    if isinstance(labels, str):
+        labels = json.loads(labels) if labels.strip() else {}
+    if not isinstance(labels, dict):
+        raise ValueError("app_token_labels must be an object")
+    customer_ids_raw = raw.get("google_ads_customer_ids", [])
+    if isinstance(customer_ids_raw, str):
+        customer_ids = [item.strip().replace("-", "") for item in customer_ids_raw.split(",") if item.strip()]
+    else:
+        customer_ids = [str(item).strip().replace("-", "") for item in customer_ids_raw if str(item).strip()]  # type: ignore[union-attr]
+    for customer_id in customer_ids:
+        if not customer_id.isdigit():
+            raise ValueError("Google Ads customer ids must be numeric")
+    now = dt.datetime.now(dt.timezone.utc).isoformat()
+    return {
+        "id": project_id,
+        "name": name,
+        "mmp_provider": provider,
+        "mmp_api_token_env": token_env,
+        "app_tokens": app_tokens,
+        "app_token_labels": {str(k): str(v) for k, v in labels.items()},
+        "google_ads_enabled": bool(raw.get("google_ads_enabled")),
+        "google_ads_config_path": str(raw.get("google_ads_config_path") or "").strip(),
+        "google_ads_customer_ids": customer_ids,
+        "database_path": str(raw.get("database_path") or "").strip(),
+        "gcs_prefix": str(raw.get("gcs_prefix") or "").strip().strip("/"),
+        "created_at": str(raw.get("created_at") or now),
+        "updated_at": now,
+    }
+
+
+def read_project_registry() -> dict[str, object]:
+    payload = gcs_store.download_gzip_json(CONFIG, PROJECT_STORE_PATH) if gcs_store.enabled(CONFIG) else None
+    if payload is None:
+        local = project_store_file()
+        if local.exists():
+            payload = json.loads(local.read_text(encoding="utf-8"))
+    projects = payload.get("projects", []) if isinstance(payload, dict) else []
+    if not projects:
+        projects = [default_project()]
+    sanitized = []
+    seen = set()
+    for raw in projects:
+        if not isinstance(raw, dict):
+            continue
+        project = sanitize_project(raw)
+        if project["id"] in seen:
+            continue
+        seen.add(str(project["id"]))
+        sanitized.append(project)
+    if not sanitized:
+        sanitized = [default_project()]
+    active_id = payload.get("active_project_id") if isinstance(payload, dict) else None
+    if active_id not in {project["id"] for project in sanitized}:
+        active_id = sanitized[0]["id"]
+    return {"active_project_id": active_id, "projects": sanitized}
+
+
+def write_project_registry(registry: dict[str, object]) -> None:
+    payload = {
+        "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "active_project_id": registry.get("active_project_id"),
+        "projects": registry.get("projects", []),
+    }
+    if gcs_store.enabled(CONFIG):
+        gcs_store.upload_gzip_json(CONFIG, PROJECT_STORE_PATH, payload)
+        return
+    local = project_store_file()
+    local.parent.mkdir(parents=True, exist_ok=True)
+    local.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def public_project(project: dict[str, object]) -> dict[str, object]:
+    return {
+        "id": project["id"],
+        "name": project["name"],
+        "mmp_provider": project["mmp_provider"],
+        "mmp_api_token_env": project["mmp_api_token_env"],
+        "app_tokens": project.get("app_tokens", []),
+        "app_token_count": len(project.get("app_tokens", [])),  # type: ignore[arg-type]
+        "app_token_labels": project.get("app_token_labels", {}),
+        "google_ads_enabled": bool(project.get("google_ads_enabled")),
+        "google_ads_configured": bool(project.get("google_ads_config_path") or project.get("google_ads_customer_ids")),
+        "google_ads_config_path": project.get("google_ads_config_path", ""),
+        "google_ads_customer_ids": project.get("google_ads_customer_ids", []),
+        "created_at": project.get("created_at"),
+        "updated_at": project.get("updated_at"),
+    }
+
+
+def project_registry_state() -> dict[str, object]:
+    registry = read_project_registry()
+    return {
+        "active_project_id": registry["active_project_id"],
+        "projects": [public_project(project) for project in registry["projects"]],  # type: ignore[index]
+    }
+
+
+def upsert_project(raw: dict[str, object], actor: str) -> dict[str, object]:
+    project = sanitize_project(raw)
+    with PROJECTS_LOCK:
+        registry = read_project_registry()
+        projects = [dict(item) for item in registry["projects"]]  # type: ignore[index]
+        replaced = False
+        for index, existing in enumerate(projects):
+            if existing.get("id") == project["id"]:
+                project["created_at"] = existing.get("created_at", project["created_at"])
+                projects[index] = project
+                replaced = True
+                break
+        if not replaced:
+            projects.append(project)
+        registry["projects"] = sorted(projects, key=lambda item: str(item.get("name", "")).lower())
+        registry["active_project_id"] = project["id"]
+        write_project_registry(registry)
+    log_event("project_saved", actor=actor, project_id=project["id"])
+    return project_registry_state()
+
+
+def project_by_id(project_id: str | None) -> dict[str, object]:
+    registry = read_project_registry()
+    requested = project_id or str(registry["active_project_id"])
+    for project in registry["projects"]:  # type: ignore[index]
+        if project["id"] == requested:
+            return project
+    raise ValueError(f"unknown project_id: {requested}")
+
+
+def project_config(project_id: str | None) -> dict[str, object]:
+    project = project_by_id(project_id)
+    cfg = copy.deepcopy(CONFIG)
+    cfg["project"] = {"id": project["id"], "name": project["name"]}
+    cfg.setdefault("adjust", {})
+    cfg["adjust"]["provider"] = project["mmp_provider"]
+    cfg["adjust"]["api_token_env"] = project["mmp_api_token_env"]
+    cfg["adjust"]["app_tokens"] = list(project.get("app_tokens", []))  # type: ignore[arg-type]
+    cfg["adjust"]["app_token_labels"] = dict(project.get("app_token_labels", {}))  # type: ignore[arg-type]
+    cfg.setdefault("google_ads", {})
+    cfg["google_ads"].update(
+        {
+            "enabled": bool(project.get("google_ads_enabled")),
+            "config_path": project.get("google_ads_config_path", ""),
+            "customer_ids": list(project.get("google_ads_customer_ids", [])),  # type: ignore[arg-type]
+        }
+    )
+    base_db = engine.database_path(CONFIG)
+    db_path = str(project.get("database_path") or base_db.with_name(f"{base_db.stem}-{project['id']}{base_db.suffix or '.sqlite3'}"))
+    cfg["_database_path_override"] = db_path
+    base_prefix = gcs_store.prefix(CONFIG)
+    cfg["_gcs_prefix_override"] = str(project.get("gcs_prefix") or f"{base_prefix}/projects/{project['id']}").strip("/")
+    return cfg
+
+
+def query_project_id(query: dict[str, list[str]]) -> str | None:
+    return query.get("project_id", query.get("project", [None]))[0]
+
+
 def invalidate_summary_cache() -> None:
     with SUMMARY_LOCK:
         SUMMARY_CACHE["payloads"] = {}
 
 
-def db_status() -> dict[str, object]:
-    db = engine.connect(CONFIG)
+def db_status(query: dict[str, list[str]] | None = None) -> dict[str, object]:
+    cfg = project_config(query_project_id(query or {}))
+    db = engine.connect(cfg)
     row_count = db.execute("select count(*) from cohort_rows").fetchone()[0]
     return {
+        "project": cfg.get("project", {}),
         "sync_in_progress": SYNC_IN_PROGRESS,
         "sync_started_at": SYNC_STARTED_AT,
         "latest_sync": engine.latest_sync(db),
@@ -239,22 +451,23 @@ def run_sync(callable_, *args: object, **kwargs: object) -> object:
         SYNC_LOCK.release()
 
 
-def warming_payload(db, row_count: int, weekly_count: int) -> dict[str, object]:
+def warming_payload(config: dict[str, object], db, row_count: int, weekly_count: int) -> dict[str, object]:
     return {
         "status": "warming_up",
+        "project": config.get("project", {}),
         "latest_sync": engine.latest_sync(db),
         "row_count": row_count,
         "subject_row_count": 0,
         "cohort_weeks": weekly_count,
         "predictions": [],
-        "horizons": [int(h) for h in CONFIG["prediction"]["horizons"]],
+        "horizons": [int(h) for h in config["prediction"]["horizons"]],  # type: ignore[index]
         "summary_by_horizon": {},
     }
 
 
-def lazy_seed_worker() -> None:
+def lazy_seed_worker(config: dict[str, object]) -> None:
     try:
-        result = run_sync(engine.ensure_seeded, CONFIG)
+        result = run_sync(engine.ensure_seeded, config)
         if isinstance(result, dict) and result.get("status") == "busy":
             log_event("lazy_seed_skipped", reason="locked")
     except Exception as exc:  # noqa: BLE001
@@ -262,7 +475,7 @@ def lazy_seed_worker() -> None:
         traceback.print_exc()
 
 
-def trigger_lazy_seed() -> None:
+def trigger_lazy_seed(config: dict[str, object]) -> None:
     if SYNC_LOCK.locked():
         log_event("lazy_seed_skipped", reason="locked")
         return
@@ -270,21 +483,21 @@ def trigger_lazy_seed() -> None:
         if SYNC_LOCK.locked():
             log_event("lazy_seed_skipped", reason="locked")
             return
-        thread = threading.Thread(target=lazy_seed_worker, name="lazy-seed", daemon=True)
+        thread = threading.Thread(target=lazy_seed_worker, args=(config,), name="lazy-seed", daemon=True)
         thread.start()
         log_event("lazy_seed_started")
 
 
-def maybe_seed(query: dict[str, list[str]]) -> dict[str, object] | None:
+def maybe_seed(config: dict[str, object], query: dict[str, list[str]]) -> dict[str, object] | None:
     if query.get("seed", ["1"])[0] == "0":
         return None
-    db = engine.connect(CONFIG)
+    db = engine.connect(config)
     count = db.execute("select count(*) from cohort_rows").fetchone()[0]
     weekly_count = db.execute("select count(*) from cohort_rows where granularity='week'").fetchone()[0]
     if count and weekly_count:
         return None
-    trigger_lazy_seed()
-    return warming_payload(db, count, weekly_count)
+    trigger_lazy_seed(config)
+    return warming_payload(config, db, count, weekly_count)
 
 
 def summary_options(query: dict[str, list[str]]) -> dict[str, object]:
@@ -303,25 +516,31 @@ def summary_options(query: dict[str, list[str]]) -> dict[str, object]:
 
 
 def summary_payload(query: dict[str, list[str]]) -> dict[str, object]:
-    warming = maybe_seed(query)
+    cfg = project_config(query_project_id(query))
+    warming = maybe_seed(cfg, query)
     if warming is not None:
         return warming
     options = summary_options(query)
-    cache_key = json.dumps(options, sort_keys=True)
+    cache_key = json.dumps({"project_id": cfg.get("project", {}).get("id"), **options}, sort_keys=True)
     now = time.monotonic()
     with SUMMARY_LOCK:
         payloads = SUMMARY_CACHE.setdefault("payloads", {})
         cached = payloads.get(cache_key) if isinstance(payloads, dict) else None
         if cached and now - float(cached["created_at"]) < SUMMARY_TTL_SECONDS:
             return cached["payload"]  # type: ignore[return-value]
-        payload = engine.load_summary_artifact(CONFIG, options) or engine.summary(CONFIG, options)
+        payload = engine.load_summary_artifact(cfg, options) or engine.summary(cfg, options)
         if isinstance(payloads, dict):
             payloads[cache_key] = {"payload": payload, "created_at": now}
         return payload
 
 
 def backtest_payload() -> dict[str, object]:
-    return engine.load_backtest_artifact(CONFIG) or engine.backtest(CONFIG)
+    return backtest_payload_for_project(None)
+
+
+def backtest_payload_for_project(project_id: str | None) -> dict[str, object]:
+    cfg = project_config(project_id)
+    return engine.load_backtest_artifact(cfg) or engine.backtest(cfg)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -353,7 +572,10 @@ class Handler(BaseHTTPRequestHandler):
             self.serve_static(parsed.path.removeprefix("/static/"))
             return
         if parsed.path == "/api/status":
-            self.respond(*json_bytes(db_status()))
+            self.respond(*json_bytes(db_status(query)))
+            return
+        if parsed.path == "/api/projects":
+            self.respond(*json_bytes(project_registry_state()))
             return
         if parsed.path == "/api/access":
             try:
@@ -369,7 +591,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/backtest":
             try:
-                self.respond(*json_bytes(backtest_payload()))
+                self.respond(*json_bytes(backtest_payload_for_project(query_project_id(query))))
             except Exception as exc:  # noqa: BLE001 - surface operational failure.
                 self.respond(*json_bytes({"status": "error", "error": str(exc), "trace": traceback.format_exc()}, 500))
             return
@@ -398,9 +620,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(*json_bytes({"error": "bad_request", "detail": "days, weeks, and week_offset must be integers"}, 400))
                 return
             try:
+                cfg = project_config(query_project_id(query))
                 payload = run_sync(
                     engine.sync_adjust,
-                    CONFIG,
+                    cfg,
                     force=force,
                     mode=mode,
                     days=days,
@@ -414,6 +637,49 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     status = 500
                 self.respond(*json_bytes(payload, status))
+            except Exception as exc:  # noqa: BLE001
+                self.respond(*json_bytes({"status": "error", "error": str(exc), "trace": traceback.format_exc()}, 500))
+            return
+        if parsed.path == "/api/projects":
+            actor = current_user_email(self.headers)
+            if not actor or not is_admin_email(actor):
+                self.respond(*json_bytes({"error": "forbidden"}, 403))
+                return
+            try:
+                body = self.read_json_body()
+                self.respond(*json_bytes(upsert_project(body, actor)))
+            except ValueError as exc:
+                self.respond(*json_bytes({"error": "bad_request", "detail": str(exc)}, 400))
+            except Exception as exc:  # noqa: BLE001
+                self.respond(*json_bytes({"status": "error", "error": str(exc), "trace": traceback.format_exc()}, 500))
+            return
+        if parsed.path == "/api/projects/sync":
+            actor = current_user_email(self.headers)
+            if not actor or not is_admin_email(actor):
+                self.respond(*json_bytes({"error": "forbidden"}, 403))
+                return
+            if SYNC_LOCK.locked():
+                self.respond(*json_bytes({"status": "busy", "warning": "sync already in progress"}, 409))
+                return
+            try:
+                body = self.read_json_body()
+                cfg = project_config(str(body.get("project_id") or ""))
+                mode = str(body.get("mode") or "daily")
+                if mode not in {"daily", "weekly", "all"}:
+                    raise ValueError("mode must be one of: daily, weekly, all")
+                payload = run_sync(
+                    engine.sync_adjust,
+                    cfg,
+                    force=bool(body.get("force")),
+                    mode=mode,
+                    days=int(body.get("days") or 3),
+                    weeks=int(body["weeks"]) if body.get("weeks") not in {None, ""} else None,
+                    week_offset=int(body.get("week_offset") or 0),
+                )
+                status = 200 if isinstance(payload, dict) and payload.get("status") == "ok" else 409 if isinstance(payload, dict) and payload.get("status") == "busy" else 500
+                self.respond(*json_bytes(payload, status))
+            except ValueError as exc:
+                self.respond(*json_bytes({"error": "bad_request", "detail": str(exc)}, 400))
             except Exception as exc:  # noqa: BLE001
                 self.respond(*json_bytes({"status": "error", "error": str(exc), "trace": traceback.format_exc()}, 500))
             return
@@ -434,6 +700,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(*json_bytes({"status": "error", "error": str(exc)}, 500))
             return
         self.respond(*json_bytes({"error": "not found"}, 404))
+
+    def read_json_body(self) -> dict[str, object]:
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        body = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+        if not isinstance(body, dict):
+            raise ValueError("JSON body must be an object")
+        return body
 
     def log_message(self, format: str, *args: object) -> None:
         print(f"{self.address_string()} - {format % args}")
@@ -495,7 +768,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def start_background_seed() -> None:
     try:
-        result = run_sync(engine.ensure_seeded, CONFIG)
+        result = run_sync(engine.ensure_seeded, project_config(None))
         if isinstance(result, dict) and result.get("status") == "busy":
             print("Initial sync skipped: sync already in progress")
     except Exception as exc:  # noqa: BLE001
