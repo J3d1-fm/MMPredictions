@@ -23,6 +23,14 @@ MMPredictions lets app teams connect their own MMP cohort API credentials, optio
 
 The baseline remains the default production engine. Use `/api/backtest` to compare predicted versus actual performance before switching model families.
 
+Detailed documentation:
+
+- [User Guide](docs/user-guide.md): product-facing guide for marketers, analysts, and UA managers.
+- [Model Methodology and Technical Reference](docs/model-methodology.md): formulas, model families, backtest methodology, storage, sync, artifacts, and scaling notes.
+- [Architecture](docs/architecture.md): short system overview.
+- [Connectors](docs/connectors.md): MMP and Google Ads connector contracts.
+- [Deployment](docs/deployment.md): local and Cloud Run setup.
+
 ## Quick Start
 
 ```bash
