@@ -1355,14 +1355,14 @@ function renderBacktest() {
 
 async function loadBacktest(force = false) {
   if (backtestPromise) return backtestPromise;
+  const cached = force ? null : readBacktestCache();
+  if (cached) {
+    backtestState = cached;
+    renderBacktest();
+    return;
+  }
   backtestPromise = (async () => {
-    const cached = force ? null : readBacktestCache();
-    if (cached) {
-      backtestState = cached;
-      renderBacktest();
-    } else {
-      document.getElementById("backtestSummaryText").textContent = "Loading backtest...";
-    }
+    document.getElementById("backtestSummaryText").textContent = "Loading backtest...";
     const params = new URLSearchParams({project_id: selected().projectId || "default"});
     const res = await fetch(`/api/backtest?${params}`, {cache: "no-store"});
     const payload = await res.json();
@@ -1562,18 +1562,19 @@ function render() {
 
 async function load(force = false) {
   if (loadPromise) return loadPromise;
+  const params = summaryParams();
+  const cacheKey = summaryCacheKey(params);
+  const cached = force ? null : readSummaryCache(cacheKey);
+  if (cached) {
+    state = cached.payload;
+    render();
+    const syncStatus = document.getElementById("syncStatus");
+    syncStatus.textContent = `${syncStatus.textContent} · cached`;
+    return;
+  }
   loadPromise = (async () => {
-    const params = summaryParams();
-    const cacheKey = summaryCacheKey(params);
-    const cached = force ? null : readSummaryCache(cacheKey);
-    if (cached) {
-      state = cached.payload;
-      document.getElementById("syncStatus").textContent = "Showing cached dashboard data; refreshing in background...";
-      render();
-    } else {
-      setView("loading");
-      document.getElementById("syncStatus").textContent = "Loading dashboard data...";
-    }
+    setView("loading");
+    document.getElementById("syncStatus").textContent = "Loading dashboard data...";
     try {
       const res = await fetch(`/api/summary?${params}`, {cache: "no-store"});
       const payload = await res.json();
@@ -1582,10 +1583,6 @@ async function load(force = false) {
       writeSummaryCache(cacheKey, payload);
       render();
     } catch (err) {
-      if (cached) {
-        document.getElementById("syncStatus").textContent = `Showing cached dashboard data; refresh failed: ${err.message}`;
-        return;
-      }
       throw err;
     }
   })();
@@ -1891,8 +1888,8 @@ document.getElementById("projectFilter").addEventListener("change", () => {
   latestSyncStamp = null;
   page = 1;
   writeHash();
-  load(true).catch(err => setView("error", err.message));
-  if (activeTab === "backtest") loadBacktest(true).catch(err => renderBacktestError(err.message));
+  load(false).catch(err => setView("error", err.message));
+  if (activeTab === "backtest") loadBacktest(false).catch(err => renderBacktestError(err.message));
 });
 document.getElementById("connectorsButton").addEventListener("click", () => setActiveTab("connectors"));
 document.getElementById("addMmpProject").addEventListener("click", () => openProjectModal(null, false));
