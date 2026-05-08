@@ -574,6 +574,7 @@ th {
 }
 
 th[role="button"] { cursor: pointer; user-select: none; }
+th[data-help] { cursor: help; }
 th[aria-sort="ascending"]::after { content: " ▲"; }
 th[aria-sort="descending"]::after { content: " ▼"; }
 

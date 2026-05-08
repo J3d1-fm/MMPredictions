@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>MMPredictions pROAS</title>
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260508-backtestcompact">
-  <script src="/static/dashboard.js?v=20260508-backtestcompact" defer></script>
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260508-columnhelp">
+  <script src="/static/dashboard.js?v=20260508-columnhelp" defer></script>
 </head>
 <body>
   <header>
@@ -120,22 +120,22 @@
           <caption>Predicted campaign cohort ROAS and pLTV with horizons in columns</caption>
           <thead>
             <tr>
-              <th data-sort="cohort_start" scope="col">Cohort</th>
-              <th data-sort="platform" scope="col">Platform</th>
-              <th data-sort="country" scope="col">Country</th>
-              <th data-sort="source" scope="col">Source</th>
-              <th data-sort="campaign" class="campaign" scope="col">Campaign</th>
-              <th data-sort="cost" class="num" scope="col">Cost</th>
-              <th data-sort="h_7" class="num" scope="col">H7</th>
-              <th data-sort="h_30" class="num" scope="col">H30</th>
-              <th data-sort="h_60" class="num" scope="col">H60</th>
-              <th data-sort="h_90" class="num" scope="col">H90</th>
-              <th data-sort="h_120" class="num" scope="col">H120</th>
-              <th data-sort="h_180" class="num" scope="col">H180</th>
-              <th data-sort="h_360" class="num" scope="col">H360</th>
-              <th data-sort="h_540" class="num" scope="col">H540</th>
-              <th data-sort="h_720" class="num" scope="col">H720</th>
-              <th data-sort="quality" scope="col">Decision quality</th>
+              <th data-sort="cohort_start" scope="col" data-help="Дата или диапазон дат когорты, по которой считаются фактические и прогнозные метрики.">Cohort</th>
+              <th data-sort="platform" scope="col" data-help="Платформа приложения: Android или iOS.">Platform</th>
+              <th data-sort="country" scope="col" data-help="Страна когорты из MMP.">Country</th>
+              <th data-sort="source" scope="col" data-help="Рекламный источник или агрегированный канал: Facebook, TikTok, Mintegral, Apple и т.д.">Source</th>
+              <th data-sort="campaign" class="campaign" scope="col" data-help="Название кампании в рекламной сети/MMP. Можно сжимать ширину колонки.">Campaign</th>
+              <th data-sort="cost" class="num" scope="col" data-help="Spend выбранной когорты в долларах.">Cost</th>
+              <th data-sort="h_7" class="num" scope="col" data-help="ROAS/pLTV на 7-й день после установки. Actual, если когорта уже созрела; pred, если значение прогнозное.">H7</th>
+              <th data-sort="h_30" class="num" scope="col" data-help="ROAS/pLTV на 30-й день после установки. Actual для зрелых когорт, pred для ранних.">H30</th>
+              <th data-sort="h_60" class="num" scope="col" data-help="ROAS/pLTV на 60-й день. Может быть direct metric или proxy, если источник не отдаёт D60 напрямую.">H60</th>
+              <th data-sort="h_90" class="num" scope="col" data-help="ROAS/pLTV на 90-й день после установки.">H90</th>
+              <th data-sort="h_120" class="num" scope="col" data-help="ROAS/pLTV на 120-й день после установки.">H120</th>
+              <th data-sort="h_180" class="num" scope="col" data-help="ROAS/pLTV на 180-й день. Обычно долгий горизонт, часто считается через monthly proxy.">H180</th>
+              <th data-sort="h_360" class="num" scope="col" data-help="ROAS/pLTV на 360-й день, 12 месяцев.">H360</th>
+              <th data-sort="h_540" class="num" scope="col" data-help="ROAS/pLTV на 540-й день, 18 месяцев.">H540</th>
+              <th data-sort="h_720" class="num" scope="col" data-help="ROAS/pLTV на 720-й день, 24 месяца.">H720</th>
+              <th data-sort="quality" scope="col" data-help="Итоговая пригодность строки для решения: confidence, backtest error и размер исторической выборки.">Decision quality</th>
             </tr>
           </thead>
           <tbody id="rows"></tbody>
@@ -172,15 +172,15 @@
           <caption>Backtest summary by model and horizon</caption>
           <thead>
             <tr>
-              <th scope="col">Model</th>
-              <th scope="col">Horizon</th>
-              <th class="num" scope="col">Rows</th>
-              <th class="num" scope="col">Actual ROAS</th>
-              <th class="num" scope="col">Pred ROAS</th>
-              <th class="num" scope="col">Weighted MAPE</th>
-              <th class="num" scope="col">Median APE</th>
-              <th class="num" scope="col">Coverage</th>
-              <th class="num" scope="col">Delta vs baseline</th>
+              <th scope="col" data-help="Название модели, которая строила прогноз в исторической проверке.">Model</th>
+              <th scope="col" data-help="Горизонт прогноза: H7, H30, H90 и т.д.">Horizon</th>
+              <th class="num" scope="col" data-help="Количество backtest-строк, вошедших в расчёт этого горизонта.">Rows</th>
+              <th class="num" scope="col" data-help="Фактический ROAS зрелых исторических когорт.">Actual ROAS</th>
+              <th class="num" scope="col" data-help="ROAS, который модель предсказала бы на момент раннего решения.">Pred ROAS</th>
+              <th class="num" scope="col" data-help="Средняя абсолютная процентная ошибка, взвешенная по spend. Ниже — лучше.">Weighted MAPE</th>
+              <th class="num" scope="col" data-help="Медианная абсолютная процентная ошибка по строкам. Ниже — лучше.">Median APE</th>
+              <th class="num" scope="col" data-help="Доля случаев, где actual попал внутрь прогнозного диапазона low-high.">Coverage</th>
+              <th class="num" scope="col" data-help="Разница ошибки модели относительно baseline. Отрицательное значение означает, что модель лучше baseline.">Delta vs baseline</th>
             </tr>
           </thead>
           <tbody id="backtestSummaryRows"></tbody>
@@ -204,15 +204,15 @@
           <caption>Backtest model quality by segment</caption>
           <thead>
             <tr>
-              <th scope="col">Segment</th>
-              <th class="num" scope="col">Rows</th>
-              <th class="num" scope="col">Weighted spend</th>
-              <th class="num" scope="col">Baseline WMAPE</th>
-              <th class="num" scope="col">Shrinkage WMAPE</th>
-              <th class="num" scope="col">Feature WMAPE</th>
-              <th class="num" scope="col">Feature delta</th>
-              <th class="num" scope="col">Feature wins</th>
-              <th class="num" scope="col">Feature coverage</th>
+              <th scope="col" data-help="Сегмент, по которому сгруппирован backtest: источник, страна, платформа, размер когорты или spend bucket.">Segment</th>
+              <th class="num" scope="col" data-help="Количество парных historical prediction rows в сегменте.">Rows</th>
+              <th class="num" scope="col" data-help="Суммарный spend строк, использованный как вес при сравнении.">Weighted spend</th>
+              <th class="num" scope="col" data-help="Взвешенная ошибка baseline multiplier model. Ниже — лучше.">Baseline WMAPE</th>
+              <th class="num" scope="col" data-help="Взвешенная ошибка shrinkage-модели. Ниже — лучше.">Shrinkage WMAPE</th>
+              <th class="num" scope="col" data-help="Взвешенная ошибка модели с early event features. Ниже — лучше.">Feature WMAPE</th>
+              <th class="num" scope="col" data-help="Feature WMAPE минус Baseline WMAPE. Отрицательное значение означает улучшение.">Feature delta</th>
+              <th class="num" scope="col" data-help="В какой доле строк feature-модель ошиблась меньше baseline.">Feature wins</th>
+              <th class="num" scope="col" data-help="Доля строк, где actual попал в прогнозный диапазон feature-модели.">Feature coverage</th>
             </tr>
           </thead>
           <tbody id="backtestSegmentRows"></tbody>
@@ -227,18 +227,18 @@
           <caption>Backtest predicted versus actual rows</caption>
           <thead>
             <tr>
-              <th scope="col">Model</th>
-              <th scope="col">Cohort</th>
-              <th scope="col">Platform</th>
-              <th scope="col">Country</th>
-              <th scope="col">Source</th>
-              <th scope="col">Campaign</th>
-              <th class="num" scope="col">Cost</th>
-              <th class="num" scope="col">Horizon</th>
-              <th class="num" scope="col">Actual</th>
-              <th class="num" scope="col">Predicted</th>
-              <th class="num" scope="col">APE</th>
-              <th scope="col">Group</th>
+              <th scope="col" data-help="Модель, которая построила прогноз для этой исторической строки.">Model</th>
+              <th scope="col" data-help="Историческая когорта, на которой проверяется прогноз.">Cohort</th>
+              <th scope="col" data-help="Платформа приложения.">Platform</th>
+              <th scope="col" data-help="Страна когорты.">Country</th>
+              <th scope="col" data-help="Рекламный источник или канал.">Source</th>
+              <th scope="col" data-help="Кампания в рекламной сети/MMP.">Campaign</th>
+              <th class="num" scope="col" data-help="Spend исторической когорты.">Cost</th>
+              <th class="num" scope="col" data-help="Горизонт, который проверяется в этой строке.">Horizon</th>
+              <th class="num" scope="col" data-help="Фактический ROAS, observed from MMP.">Actual</th>
+              <th class="num" scope="col" data-help="Прогноз модели на выбранный горизонт.">Predicted</th>
+              <th class="num" scope="col" data-help="Absolute Percentage Error: процентная ошибка прогноза относительно actual. Ниже — лучше.">APE</th>
+              <th scope="col" data-help="Уровень fallback-группы, из которой модель взяла исторические аналоги.">Group</th>
             </tr>
           </thead>
           <tbody id="backtestRows"></tbody>
@@ -253,14 +253,14 @@
           <caption>Backtest summary for predicted retention by horizon</caption>
           <thead>
             <tr>
-              <th scope="col">Model</th>
-              <th scope="col">Horizon</th>
-              <th class="num" scope="col">Rows</th>
-              <th class="num" scope="col">Actual Retention</th>
-              <th class="num" scope="col">Pred Retention</th>
-              <th class="num" scope="col">Weighted MAPE</th>
-              <th class="num" scope="col">Median APE</th>
-              <th class="num" scope="col">Coverage</th>
+              <th scope="col" data-help="Retention-модель, используемая в backtest.">Model</th>
+              <th scope="col" data-help="Retention horizon: H7, H30, H90 и т.д.">Horizon</th>
+              <th class="num" scope="col" data-help="Количество retention backtest-строк.">Rows</th>
+              <th class="num" scope="col" data-help="Фактический retention зрелых исторических когорт.">Actual Retention</th>
+              <th class="num" scope="col" data-help="Retention, который модель предсказала бы заранее.">Pred Retention</th>
+              <th class="num" scope="col" data-help="Взвешенная абсолютная процентная ошибка retention-прогноза. Ниже — лучше.">Weighted MAPE</th>
+              <th class="num" scope="col" data-help="Медианная абсолютная процентная ошибка retention-прогноза.">Median APE</th>
+              <th class="num" scope="col" data-help="Доля случаев, где actual retention попал внутрь прогнозного диапазона.">Coverage</th>
             </tr>
           </thead>
           <tbody id="retentionBacktestSummaryRows"></tbody>
@@ -275,17 +275,17 @@
           <caption>Backtest predicted versus actual retention rows</caption>
           <thead>
             <tr>
-              <th scope="col">Cohort</th>
-              <th scope="col">Platform</th>
-              <th scope="col">Country</th>
-              <th scope="col">Source</th>
-              <th scope="col">Campaign</th>
-              <th class="num" scope="col">Installs</th>
-              <th class="num" scope="col">Horizon</th>
-              <th class="num" scope="col">Actual</th>
-              <th class="num" scope="col">Predicted</th>
-              <th class="num" scope="col">APE</th>
-              <th scope="col">Group</th>
+              <th scope="col" data-help="Историческая когорта retention-проверки.">Cohort</th>
+              <th scope="col" data-help="Платформа приложения.">Platform</th>
+              <th scope="col" data-help="Страна когорты.">Country</th>
+              <th scope="col" data-help="Рекламный источник или канал.">Source</th>
+              <th scope="col" data-help="Кампания в рекламной сети/MMP.">Campaign</th>
+              <th class="num" scope="col" data-help="Количество network installs в когорте.">Installs</th>
+              <th class="num" scope="col" data-help="Retention horizon, который проверяется в строке.">Horizon</th>
+              <th class="num" scope="col" data-help="Фактический retention, observed from MMP.">Actual</th>
+              <th class="num" scope="col" data-help="Прогноз retention-модели.">Predicted</th>
+              <th class="num" scope="col" data-help="Absolute Percentage Error: процентная ошибка retention-прогноза.">APE</th>
+              <th scope="col" data-help="Уровень fallback-группы исторических аналогов.">Group</th>
             </tr>
           </thead>
           <tbody id="retentionBacktestRows"></tbody>
@@ -316,7 +316,10 @@
       <div class="access-list-wrap">
         <table class="access-list">
           <thead>
-            <tr><th>Email</th><th>Role</th></tr>
+            <tr>
+              <th data-help="Email пользователя, которому разрешён доступ.">Email</th>
+              <th data-help="Роль пользователя: user только смотрит данные, admin может управлять пользователями и проектами.">Role</th>
+            </tr>
           </thead>
           <tbody id="accessRows"></tbody>
         </table>

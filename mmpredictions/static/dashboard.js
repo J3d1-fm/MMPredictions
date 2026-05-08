@@ -1909,18 +1909,18 @@ function initHelpTooltips() {
   };
   const hide = () => { tooltip.hidden = true; };
   document.addEventListener("mouseover", event => {
-    const target = event.target instanceof Element ? event.target.closest(".help-tip") : null;
+    const target = event.target instanceof Element ? event.target.closest(".help-tip, th[data-help]") : null;
     if (target) place(target);
   });
   document.addEventListener("focusin", event => {
-    const target = event.target instanceof Element ? event.target.closest(".help-tip") : null;
+    const target = event.target instanceof Element ? event.target.closest(".help-tip, th[data-help]") : null;
     if (target) place(target);
   });
   document.addEventListener("mouseout", event => {
-    if (event.target instanceof Element && event.target.closest(".help-tip")) hide();
+    if (event.target instanceof Element && event.target.closest(".help-tip, th[data-help]")) hide();
   });
   document.addEventListener("focusout", event => {
-    if (event.target instanceof Element && event.target.closest(".help-tip")) hide();
+    if (event.target instanceof Element && event.target.closest(".help-tip, th[data-help]")) hide();
   });
   document.addEventListener("keydown", event => {
     if (event.key === "Escape") hide();
