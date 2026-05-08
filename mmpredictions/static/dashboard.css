@@ -1191,3 +1191,232 @@ body.resizing-columns {
   .mobile-card-head { flex-direction: column; }
   .quality-pill { width: fit-content; }
 }
+
+.view-mode-toggle {
+  min-width: 132px;
+}
+
+html[data-view-mode="mobile"] body {
+  font-size: 13px;
+}
+
+html[data-view-mode="mobile"] header {
+  position: relative;
+  backdrop-filter: none;
+}
+
+html[data-view-mode="mobile"] .bar {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px max(14px, env(safe-area-inset-right)) 14px max(14px, env(safe-area-inset-left));
+}
+
+html[data-view-mode="mobile"] .title-block,
+html[data-view-mode="mobile"] .actions {
+  width: 100%;
+}
+
+html[data-view-mode="mobile"] .actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+html[data-view-mode="mobile"] .actions > * {
+  min-width: 0;
+}
+
+html[data-view-mode="mobile"] .actions button,
+html[data-view-mode="mobile"] .actions select,
+html[data-view-mode="mobile"] .actions input[type="date"] {
+  width: 100%;
+  min-height: 44px;
+}
+
+html[data-view-mode="mobile"] .sync-badge,
+html[data-view-mode="mobile"] #projectFilter:not([hidden]),
+html[data-view-mode="mobile"] #campaignFilter,
+html[data-view-mode="mobile"] #campaignExclusionsButton,
+html[data-view-mode="mobile"] #resetFilters {
+  grid-column: 1 / -1;
+}
+
+html[data-view-mode="mobile"] main {
+  padding: 14px max(12px, env(safe-area-inset-right)) 32px max(12px, env(safe-area-inset-left));
+}
+
+html[data-view-mode="mobile"] .tabs {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+html[data-view-mode="mobile"] .tab-buttons,
+html[data-view-mode="mobile"] .export-actions {
+  display: grid;
+  width: 100%;
+  gap: 8px;
+}
+
+html[data-view-mode="mobile"] .tab-buttons {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+html[data-view-mode="mobile"] .export-actions,
+html[data-view-mode="mobile"] .status,
+html[data-view-mode="mobile"] .overview-grid,
+html[data-view-mode="mobile"] .campaign-mobile-metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+html[data-view-mode="mobile"] .context-grid,
+html[data-view-mode="mobile"] .channel-overview,
+html[data-view-mode="mobile"] .layout {
+  grid-template-columns: 1fr;
+}
+
+html[data-view-mode="mobile"] .context-grid,
+html[data-view-mode="mobile"] .channel-overview {
+  padding: 12px;
+  gap: 10px;
+}
+
+html[data-view-mode="mobile"] .context-item {
+  min-height: auto;
+  padding: 12px;
+}
+
+html[data-view-mode="mobile"] .channel-head,
+html[data-view-mode="mobile"] .mobile-card-head {
+  flex-direction: column;
+  gap: 10px;
+}
+
+html[data-view-mode="mobile"] .channel-head .secondary,
+html[data-view-mode="mobile"] .channel-head .view-campaigns {
+  width: 100%;
+}
+
+html[data-view-mode="mobile"] .chart-wrap {
+  overflow-x: auto;
+  padding: 12px;
+}
+
+html[data-view-mode="mobile"] .chart-wrap svg {
+  min-width: 560px;
+}
+
+html[data-view-mode="mobile"] .table-wrap,
+html[data-view-mode="mobile"] .pager {
+  display: none;
+}
+
+html[data-view-mode="mobile"] .cards {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+html[data-view-mode="mobile"] .campaign-mobile-card {
+  display: grid;
+  gap: 12px;
+}
+
+html[data-view-mode="desktop"] body {
+  min-width: 1040px;
+}
+
+html[data-view-mode="desktop"] header {
+  position: sticky;
+  backdrop-filter: blur(10px);
+}
+
+html[data-view-mode="desktop"] .bar {
+  align-items: center;
+  flex-direction: row;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 1040px;
+  padding: 14px 20px;
+}
+
+html[data-view-mode="desktop"] .title-block,
+html[data-view-mode="desktop"] .actions {
+  width: auto;
+}
+
+html[data-view-mode="desktop"] .actions {
+  display: flex;
+  gap: 10px;
+}
+
+html[data-view-mode="desktop"] .actions button,
+html[data-view-mode="desktop"] .actions select,
+html[data-view-mode="desktop"] .actions input[type="date"] {
+  width: auto;
+  min-height: 36px;
+}
+
+html[data-view-mode="desktop"] .sync-badge,
+html[data-view-mode="desktop"] #projectFilter:not([hidden]),
+html[data-view-mode="desktop"] #campaignFilter,
+html[data-view-mode="desktop"] #campaignExclusionsButton,
+html[data-view-mode="desktop"] #resetFilters {
+  grid-column: auto;
+}
+
+html[data-view-mode="desktop"] main {
+  min-width: 1040px;
+  padding: 18px 20px 32px;
+}
+
+html[data-view-mode="desktop"] .tabs {
+  display: flex;
+  align-items: center;
+  flex-direction: row;
+  justify-content: space-between;
+}
+
+html[data-view-mode="desktop"] .tab-buttons,
+html[data-view-mode="desktop"] .export-actions {
+  display: flex;
+  width: auto;
+}
+
+html[data-view-mode="desktop"] .status {
+  grid-template-columns: repeat(5, minmax(150px, 1fr));
+}
+
+html[data-view-mode="desktop"] .context-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+html[data-view-mode="desktop"] .channel-overview {
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+}
+
+html[data-view-mode="desktop"] .overview-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+html[data-view-mode="desktop"] .layout {
+  grid-template-columns: 1.15fr 0.85fr;
+}
+
+html[data-view-mode="desktop"] .table-wrap {
+  display: block;
+}
+
+html[data-view-mode="desktop"] .table-section .table-wrap {
+  display: block;
+  overflow: auto;
+}
+
+html[data-view-mode="desktop"] .pager {
+  display: flex;
+}
+
+html[data-view-mode="desktop"] .cards {
+  display: none;
+}

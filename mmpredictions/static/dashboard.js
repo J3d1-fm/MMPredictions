@@ -21,6 +21,7 @@ const activeTabKey = "mmpredictions-active-tab-v1";
 const backtestCacheKey = "mmpredictions-backtest-v1";
 const campaignExclusionsKey = "mmpredictions-campaign-exclusions-v1";
 const projectPreferenceKey = "mmpredictions-project-v1";
+const viewModePreferenceKey = "mmpredictions-view-mode-v1";
 const summaryCacheMaxAgeMs = 24 * 60 * 60 * 1000;
 let excludedCampaignSet = new Set();
 
@@ -91,6 +92,44 @@ function safeStorageSet(key, value) {
   } catch (_err) {
     return;
   }
+}
+
+function screenProfile() {
+  return {
+    width: window.innerWidth || document.documentElement.clientWidth || 0,
+    height: window.innerHeight || document.documentElement.clientHeight || 0,
+    dpr: Number(window.devicePixelRatio || 1),
+    coarsePointer: window.matchMedia?.("(pointer: coarse)").matches || false,
+    mobileViewport: window.matchMedia?.("(max-width: 720px)").matches || false
+  };
+}
+
+function updateScreenProfile() {
+  const profile = screenProfile();
+  document.documentElement.dataset.screenClass = profile.mobileViewport || (profile.coarsePointer && profile.width <= 980)
+    ? "mobile"
+    : "desktop";
+  document.documentElement.dataset.screenWidth = String(profile.width);
+  document.documentElement.dataset.screenDpr = String(profile.dpr);
+}
+
+function applyViewMode(mode) {
+  const resolved = ["auto", "mobile", "desktop"].includes(mode) ? mode : "auto";
+  document.documentElement.dataset.viewMode = resolved;
+  const control = document.getElementById("viewModeToggle");
+  if (control) control.value = resolved;
+  updateScreenProfile();
+}
+
+function readViewMode() {
+  applyViewMode(safeStorageGet(viewModePreferenceKey) || "auto");
+}
+
+function setViewMode(mode) {
+  safeStorageSet(viewModePreferenceKey, mode);
+  applyViewMode(mode);
+  if (state) render();
+  if (backtestState) renderBacktest(backtestState);
 }
 
 function readCampaignExclusions() {
@@ -1981,6 +2020,8 @@ document.getElementById("resetFilters").addEventListener("click", () => {
 });
 document.getElementById("prevPage").addEventListener("click", () => { page -= 1; renderTable(); });
 document.getElementById("nextPage").addEventListener("click", () => { page += 1; renderTable(); });
+document.getElementById("viewModeToggle").addEventListener("change", event => setViewMode(event.target.value));
+window.addEventListener("resize", debounce(updateScreenProfile, 120), {passive: true});
 
 function initResizableColumns() {
   const table = document.getElementById("campaignTable");
@@ -2063,6 +2104,7 @@ document.querySelectorAll("th[data-sort]").forEach(th => {
 
 initResizableColumns();
 initHelpTooltips();
+readViewMode();
 excludedCampaignSet = readCampaignExclusions();
 readPreferences();
 readHash();

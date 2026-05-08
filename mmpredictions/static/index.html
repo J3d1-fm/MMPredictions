@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>MMPredictions pROAS</title>
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260508-mobile">
-  <script src="/static/dashboard.js?v=20260508-mobile" defer></script>
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260508-viewmode">
+  <script src="/static/dashboard.js?v=20260508-viewmode" defer></script>
 </head>
 <body>
   <header>
@@ -17,6 +17,11 @@
       <div class="actions">
         <span id="syncBadge" class="sync-badge" hidden aria-live="polite"></span>
         <button id="refreshButton" type="button">Refresh</button>
+        <select id="viewModeToggle" class="view-mode-toggle" aria-label="Layout mode">
+          <option value="auto">Auto view</option>
+          <option value="mobile">Mobile view</option>
+          <option value="desktop">Desktop view</option>
+        </select>
         <select id="projectFilter" aria-label="Project" hidden>
           <option value="default">Default project</option>
         </select>
