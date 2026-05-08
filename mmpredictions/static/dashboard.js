@@ -857,25 +857,21 @@ function renderCohortContext() {
   document.getElementById("contextSummary").textContent = `${cohortStart} - ${cohortEnd}`;
   document.getElementById("cohortContext").innerHTML = `
     <div class="context-item">
-      <span class="context-help">${helpTip("The cohort window currently being evaluated. Cards and charts use the latest selected cohort in this window.")}</span>
       <span>Cohort window</span>
       <strong>${esc(cohortStart)} - ${esc(cohortEnd)}</strong>
       <small>${esc(scopeLabel(f.scope))} · ${campaignCount} campaigns · ${money(cost)}</small>
     </div>
     <div class="context-item">
-      <span class="context-help">${helpTip("The active traffic slice: platform, country, source, campaign, and campaign exclusions. Changing filters changes this slice.")}</span>
       <span>Traffic slice</span>
       <strong>${esc(filters.join(" · "))}</strong>
       <small>${sourceCount} sources in current result · ${allRows.length} horizon rows</small>
     </div>
     <div class="context-item">
-      <span class="context-help">${helpTip("Historical cohorts and model groups used for multiplier training. More relevant examples usually mean a more stable forecast.")}</span>
       <span>Prediction inputs</span>
       <strong>${state.cohort_weeks || 0} weekly training cohorts</strong>
       <small>${state.row_count || 0} paid training rows · anchors ${anchors.join(", ") || "n/a"} · groups ${groups.join(", ") || "n/a"}${scope.fallback ? ` · ${esc(dataScopeNote())}` : ""}</small>
     </div>
     <div class="context-item">
-      <span class="context-help">${helpTip("Actual means observed from the MMP. Proxy means a mapped replacement metric. Predicted means the model is forecasting a horizon that has not matured yet.")}</span>
       <span>Metric status</span>
       <strong>${actualCount} actual · ${proxyCount} proxy · ${predCount} predicted</strong>
       <small>Cards and charts use this selected latest cohort only</small>
