@@ -12,11 +12,11 @@ let backtestState = null;
 let backtestPromise = null;
 const pageSize = 50;
 const descDefaultSortKeys = new Set(["cost", "quality", "network_installs"]);
-const defaultColumnWidths = [118, 92, 132, 150, 360, 118, 126, 126, 126, 126, 126, 136, 136, 136, 136, 178];
+const defaultColumnWidths = [112, 88, 128, 138, 240, 112, 118, 118, 118, 118, 118, 128, 128, 128, 118, 164];
 const overviewHorizons = [7, 30, 60, 90, 120, 180, 360, 540, 720];
 const summaryCachePrefix = "mmpredictions-summary-v3:";
 const preferencesKey = "mmpredictions-preferences-v1";
-const columnWidthsKey = "mmpredictions-column-widths-v1";
+const columnWidthsKey = "mmpredictions-column-widths-v2";
 const activeTabKey = "mmpredictions-active-tab-v1";
 const backtestCacheKey = "mmpredictions-backtest-v1";
 const campaignExclusionsKey = "mmpredictions-campaign-exclusions-v1";
@@ -1991,6 +1991,13 @@ function initResizableColumns() {
     const handle = document.createElement("span");
     handle.className = "resize-handle";
     handle.setAttribute("aria-hidden", "true");
+    handle.title = "Drag to resize. Double-click to reset this column.";
+    handle.addEventListener("dblclick", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      cols[index].style.width = `${Number(defaultColumnWidths[index] || 120)}px`;
+      safeStorageSet(columnWidthsKey, JSON.stringify(cols.map(item => parseFloat(item.style.width) || 0)));
+    });
     handle.addEventListener("pointerdown", event => {
       event.preventDefault();
       event.stopPropagation();
@@ -1999,7 +2006,7 @@ function initResizableColumns() {
       const startWidth = parseFloat(col.style.width) || th.offsetWidth;
       document.body.classList.add("resizing-columns");
       const onMove = moveEvent => {
-        const next = Math.max(72, startWidth + moveEvent.clientX - startX);
+        const next = Math.max(56, startWidth + moveEvent.clientX - startX);
         col.style.width = `${next}px`;
       };
       const onUp = () => {

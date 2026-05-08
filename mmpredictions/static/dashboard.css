@@ -524,6 +524,11 @@ svg { width: 100%; height: auto; display: block; }
 .backtest-section { margin-top: 18px; }
 .table-wrap { overflow: auto; }
 
+.table-section .table-wrap {
+  max-height: min(72vh, 760px);
+  overscroll-behavior: contain;
+}
+
 table {
   width: max-content;
   min-width: 100%;
@@ -556,6 +561,13 @@ th {
   font-size: 12px;
   font-weight: 600;
   background: #fbfcfe;
+}
+
+#campaignTable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  box-shadow: inset 0 -1px 0 var(--line), 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
 th[role="button"] { cursor: pointer; user-select: none; }
@@ -592,7 +604,7 @@ body.resizing-columns {
 }
 
 .num { text-align: right; font-variant-numeric: tabular-nums; }
-.campaign { width: 28%; }
+.campaign { width: auto; }
 .risk-low { color: var(--green); }
 .risk-mid { color: var(--amber); }
 .risk-high { color: var(--red); }
