@@ -31,6 +31,30 @@ MIGRATION_LOCK = threading.Lock()
 MIGRATED_DATABASES: set[str] = set()
 _LOCAL = threading.local()
 
+EARLY_FEATURE_METRICS = (
+    "revenue_events_total_d1",
+    "revenue_events_total_d3",
+    "revenue_events_total_d7",
+    "revenue_events_total_d30",
+    "revenue_events_per_user_d7",
+    "revenue_events_per_active_user_d7",
+    "first_paying_users_total_d7",
+    "cumulative_paying_users_conversion_rate_d7",
+    "paying_user_size_d7",
+    "revenue_total_per_paying_user_d7",
+    "sessions_d1",
+    "sessions_d3",
+    "sessions_d7",
+    "sessions_per_user_d7",
+    "time_spent_per_user_d7",
+    "ad_impressions_total_d7",
+    "ad_revenue_total_d7",
+    "ad_rpm_d7",
+)
+FEATURE_COLUMNS = tuple((metric, "real") for metric in EARLY_FEATURE_METRICS) + (
+    ("event_features_json", "text not null default '{}'"),
+)
+
 COHORT_COLUMNS = (
     ("cohort_start", "text not null"),
     ("cohort_end", "text not null"),
@@ -74,6 +98,7 @@ COHORT_COLUMNS = (
     ("retention_m12", "real"),
     ("retention_m18", "real"),
     ("retention_m24", "real"),
+    *FEATURE_COLUMNS,
     ("raw_json", "text not null"),
     ("fetched_at", "text not null"),
 )
@@ -201,6 +226,17 @@ def normalize_config(config: dict[str, Any]) -> None:
         for metric in retention_metrics:
             if metric not in metrics:
                 metrics.append(metric)
+        feature_cfg = config.setdefault("feature_metric_packs", {})
+        feature_cfg.setdefault("enabled", True)
+        feature_cfg.setdefault("active", ["early_features_v1"])
+        packs = feature_cfg.setdefault("packs", {})
+        packs.setdefault("early_features_v1", list(EARLY_FEATURE_METRICS))
+        packs.setdefault("custom_events_v1", [])
+        if feature_cfg.get("enabled", True):
+            for pack_name in feature_cfg.get("active", []):
+                for metric in packs.get(str(pack_name), []):
+                    if metric not in metrics:
+                        metrics.append(str(metric))
         adjust["metrics"] = metrics
     sync = config.setdefault("sync", {})
     sync.setdefault("excluded_sources", [])
@@ -559,73 +595,27 @@ def upsert_rows(
                 "retention_m12": retention_rate_from_row(row, "m12"),
                 "retention_m18": retention_rate_from_row(row, "m18"),
                 "retention_m24": retention_rate_from_row(row, "m24"),
+                **{metric: as_float(row.get(metric)) for metric in EARLY_FEATURE_METRICS},
+                "event_features_json": json.dumps(
+                    {metric: row.get(metric) for metric in EARLY_FEATURE_METRICS if row.get(metric) is not None},
+                    ensure_ascii=True,
+                    sort_keys=True,
+                ),
                 "raw_json": json.dumps(row, ensure_ascii=True, sort_keys=True),
                 "fetched_at": now,
             }
+            column_names = [name for name, _definition in COHORT_COLUMNS]
+            insert_columns = ", ".join(column_names)
+            insert_values = ", ".join(f":{name}" for name in column_names)
+            update_columns = [name for name in column_names if name not in COHORT_PK]
+            update_clause = ", ".join(f"{name}=excluded.{name}" for name in update_columns)
+            conflict_columns = ", ".join(COHORT_PK)
             db.execute(
-            """
-            insert into cohort_rows (
-              cohort_start, cohort_end, granularity, app, platform, country, country_code, partner_name,
-              campaign_network, campaign_id_network, installs, network_installs,
-              network_cost, network_ecpi, roas_d0, roas_d1, roas_d3, roas_d7, roas_d30,
-              roas_d60, roas_d90, roas_d120,
-              roas_m3, roas_m4, roas_m6, roas_m12, roas_m18, roas_m24,
-              revenue_d7, revenue_d30,
-              retention_d1, retention_d3, retention_d7, retention_d14, retention_d30, retention_d60,
-              retention_d90, retention_d120, retention_m6, retention_m12, retention_m18, retention_m24,
-              raw_json, fetched_at
-            ) values (
-              :cohort_start, :cohort_end, :granularity, :app, :platform, :country, :country_code, :partner_name,
-              :campaign_network, :campaign_id_network, :installs, :network_installs,
-              :network_cost, :network_ecpi, :roas_d0, :roas_d1, :roas_d3, :roas_d7, :roas_d30,
-              :roas_d60, :roas_d90, :roas_d120,
-              :roas_m3, :roas_m4, :roas_m6, :roas_m12, :roas_m18, :roas_m24,
-              :revenue_d7, :revenue_d30,
-              :retention_d1, :retention_d3, :retention_d7, :retention_d14, :retention_d30, :retention_d60,
-              :retention_d90, :retention_d120, :retention_m6, :retention_m12, :retention_m18, :retention_m24,
-              :raw_json, :fetched_at
-            )
-            on conflict (
-              cohort_start, granularity, app, country_code, partner_name, campaign_network, campaign_id_network
-            ) do update set
-              cohort_end=excluded.cohort_end,
-              platform=excluded.platform,
-              country=excluded.country,
-              installs=excluded.installs,
-              network_installs=excluded.network_installs,
-              network_cost=excluded.network_cost,
-              network_ecpi=excluded.network_ecpi,
-              roas_d0=excluded.roas_d0,
-              roas_d1=excluded.roas_d1,
-              roas_d3=excluded.roas_d3,
-              roas_d7=excluded.roas_d7,
-              roas_d30=excluded.roas_d30,
-              roas_d60=excluded.roas_d60,
-              roas_d90=excluded.roas_d90,
-              roas_d120=excluded.roas_d120,
-              roas_m3=excluded.roas_m3,
-              roas_m4=excluded.roas_m4,
-              roas_m6=excluded.roas_m6,
-              roas_m12=excluded.roas_m12,
-              roas_m18=excluded.roas_m18,
-              roas_m24=excluded.roas_m24,
-              revenue_d7=excluded.revenue_d7,
-              revenue_d30=excluded.revenue_d30,
-              retention_d1=excluded.retention_d1,
-              retention_d3=excluded.retention_d3,
-              retention_d7=excluded.retention_d7,
-              retention_d14=excluded.retention_d14,
-              retention_d30=excluded.retention_d30,
-              retention_d60=excluded.retention_d60,
-              retention_d90=excluded.retention_d90,
-              retention_d120=excluded.retention_d120,
-              retention_m6=excluded.retention_m6,
-              retention_m12=excluded.retention_m12,
-              retention_m18=excluded.retention_m18,
-              retention_m24=excluded.retention_m24,
-              raw_json=excluded.raw_json,
-              fetched_at=excluded.fetched_at
-            """,
+                f"""
+                insert into cohort_rows ({insert_columns})
+                values ({insert_values})
+                on conflict ({conflict_columns}) do update set {update_clause}
+                """,
                 values,
             )
             count += 1
@@ -793,7 +783,7 @@ def best_anchor(row: sqlite3.Row, horizon: int, age_days: int, config: dict[str,
     minimum_anchor = float(config.get("sync", {}).get("minimum_anchor_roas", 0.0))
     anchors = [int(anchor) for anchor in config.get("prediction", {}).get("anchors", [0, 1, 3, 7])]
     for anchor in sorted(anchors):
-        if anchor > horizon or anchor > age_days:
+        if anchor >= horizon or anchor > age_days:
             continue
         value = row[f"roas_d{anchor}"]
         if value is not None and value >= minimum_anchor:
@@ -805,7 +795,7 @@ def best_retention_anchor(row: sqlite3.Row | dict[str, Any], horizon: int, age_d
     minimum_anchor = float(config.get("retention", {}).get("minimum_anchor_retention", 0.0001))
     anchors = [int(anchor) for anchor in config.get("retention", {}).get("anchors", RETENTION_DEFAULTS["anchors"])]
     for anchor in sorted(anchors):
-        if anchor > horizon or anchor > age_days:
+        if anchor >= horizon or anchor > age_days:
             continue
         value = row_metric_value(row, f"retention_d{anchor}")
         if value is not None and value >= minimum_anchor:
@@ -824,6 +814,26 @@ def percentile(values: list[float], q: float) -> float:
         return ordered[int(index)]
     weight = index - lower
     return ordered[lower] * (1 - weight) + ordered[upper] * weight
+
+
+def weighted_percentile(values: list[float], weights: list[float], q: float) -> float:
+    if not values:
+        return 0.0
+    pairs = sorted(
+        (float(value), max(float(weight), 0.0))
+        for value, weight in zip(values, weights, strict=False)
+        if math.isfinite(float(value)) and math.isfinite(float(weight)) and float(weight) > 0
+    )
+    if not pairs:
+        return percentile(values, q)
+    total = sum(weight for _value, weight in pairs)
+    threshold = max(0.0, min(q, 1.0)) * total
+    running = 0.0
+    for value, weight in pairs:
+        running += weight
+        if running >= threshold:
+            return value
+    return pairs[-1][0]
 
 
 def ratio_group_specs(row: sqlite3.Row) -> list[tuple[str, Any]]:
@@ -1088,6 +1098,171 @@ def ratio_stats_shrinkage(
     }
 
 
+FEATURE_METRIC_SPECS = (
+    (1, "revenue_events_total_d1", "install_rate"),
+    (1, "sessions_d1", "install_rate"),
+    (3, "revenue_events_total_d3", "install_rate"),
+    (3, "sessions_d3", "install_rate"),
+    (7, "revenue_events_total_d7", "install_rate"),
+    (7, "revenue_events_per_user_d7", "raw"),
+    (7, "revenue_events_per_active_user_d7", "raw"),
+    (7, "first_paying_users_total_d7", "install_rate"),
+    (7, "cumulative_paying_users_conversion_rate_d7", "raw"),
+    (7, "paying_user_size_d7", "raw"),
+    (7, "revenue_total_per_paying_user_d7", "raw"),
+    (7, "sessions_d7", "install_rate"),
+    (7, "sessions_per_user_d7", "raw"),
+    (7, "time_spent_per_user_d7", "raw"),
+    (7, "ad_impressions_total_d7", "install_rate"),
+    (7, "ad_revenue_total_d7", "install_rate"),
+    (7, "ad_rpm_d7", "raw"),
+)
+
+
+def feature_model_config(config: dict[str, Any]) -> dict[str, Any]:
+    defaults = {
+        "base_model": "shrinkage_multiplier_v1",
+        "decision_days": [1, 3, 7],
+        "min_features": 2,
+        "min_feature_samples": 5,
+        "temperature": 0.75,
+        "blend_strength": 0.45,
+    }
+    merged = dict(defaults)
+    merged.update(config.get("feature_model", {}))
+    return merged
+
+
+def feature_metric_value(row: sqlite3.Row | dict[str, Any], metric: str, denominator: str) -> float | None:
+    value = row_metric_value(row, metric)
+    if value is None or value < 0:
+        return None
+    if denominator == "install_rate":
+        installs = float(row_metric_value(row, "network_installs") or row_metric_value(row, "installs") or 0)
+        if installs <= 0:
+            return None
+        return value / installs
+    if denominator == "cost_rate":
+        cost = float(row_metric_value(row, "network_cost") or 0)
+        if cost <= 0:
+            return None
+        return value / cost
+    return value
+
+
+def feature_vector(row: sqlite3.Row | dict[str, Any], anchor_day: int) -> dict[str, float]:
+    vector: dict[str, float] = {}
+    for day, metric, denominator in FEATURE_METRIC_SPECS:
+        if day > anchor_day:
+            continue
+        value = feature_metric_value(row, metric, denominator)
+        if value is not None and math.isfinite(value):
+            vector[metric] = math.log1p(max(value, 0.0))
+    return vector
+
+
+def feature_decision_anchor(row: sqlite3.Row, horizon: int, age_days: int, config: dict[str, Any]) -> tuple[int, float] | None:
+    minimum_anchor = float(config.get("sync", {}).get("minimum_anchor_roas", 0.0))
+    days = [int(day) for day in feature_model_config(config).get("decision_days", [1, 3, 7])]
+    for day in sorted(days, reverse=True):
+        if day >= horizon or day > age_days:
+            continue
+        value = row_metric_value(row, f"roas_d{day}")
+        if value is not None and value >= minimum_anchor and feature_vector(row, day):
+            return day, float(value)
+    return best_anchor(row, horizon, age_days, config)
+
+
+def anchor_for_model(model: str, row: sqlite3.Row, horizon: int, age_days: int, config: dict[str, Any]) -> tuple[int, float] | None:
+    if model == "feature_multiplier_v1":
+        return feature_decision_anchor(row, horizon, age_days, config)
+    return best_anchor(row, horizon, age_days, config)
+
+
+def feature_weighted_ratio_stats(
+    base_stats: dict[str, Any],
+    candidates: list[sqlite3.Row],
+    row: sqlite3.Row,
+    metric: str,
+    anchor_day: int,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    cfg = feature_model_config(config)
+    subject_vector = feature_vector(row, anchor_day)
+    min_features = int(cfg.get("min_features", 2))
+    min_samples = int(cfg.get("min_feature_samples", 5))
+    if len(subject_vector) < min_features:
+        result = dict(base_stats)
+        result.update({"feature_sample_size": 0, "feature_count": len(subject_vector), "feature_blend": 0.0})
+        return result
+
+    weighted: list[tuple[float, float]] = []
+    temperature = max(float(cfg.get("temperature", 0.75)), 0.05)
+    for candidate in candidates:
+        candidate_vector = feature_vector(candidate, anchor_day)
+        common = sorted(set(subject_vector) & set(candidate_vector))
+        if len(common) < min_features:
+            continue
+        distance = sum(abs(subject_vector[name] - candidate_vector[name]) for name in common) / len(common)
+        ratio = float(row_metric_value(candidate, metric) or 0) / float(candidate[f"roas_d{anchor_day}"] or 1)
+        if math.isfinite(ratio) and 0 < ratio < 100:
+            weighted.append((ratio, math.exp(-distance / temperature)))
+
+    if len(weighted) < min_samples:
+        result = dict(base_stats)
+        result.update({"feature_sample_size": len(weighted), "feature_count": len(subject_vector), "feature_blend": 0.0})
+        return result
+
+    ratios = [ratio for ratio, _weight in weighted]
+    weights = [weight for _ratio, weight in weighted]
+    feature_ratio = weighted_percentile(ratios, weights, 0.5)
+    feature_low = weighted_percentile(ratios, weights, 0.2)
+    feature_high = weighted_percentile(ratios, weights, 0.8)
+    sample_factor = min(1.0, len(weighted) / max(min_samples * 4.0, 1.0))
+    blend = max(0.0, min(float(cfg.get("blend_strength", 0.45)) * sample_factor, 0.85))
+    ratio = math.exp((1.0 - blend) * math.log(max(float(base_stats["ratio"]), 1e-9)) + blend * math.log(max(feature_ratio, 1e-9)))
+    low = math.exp((1.0 - blend) * math.log(max(float(base_stats["low_ratio"]), 1e-9)) + blend * math.log(max(min(feature_low, feature_ratio), 1e-9)))
+    high = math.exp((1.0 - blend) * math.log(max(float(base_stats["high_ratio"]), 1e-9)) + blend * math.log(max(max(feature_high, feature_ratio), 1e-9)))
+    result = dict(base_stats)
+    result.update(
+        {
+            "ratio": ratio,
+            "low_ratio": min(low, ratio),
+            "high_ratio": max(high, ratio),
+            "mape": ratio_mape(candidates, metric, anchor_day, ratio),
+            "feature_sample_size": len(weighted),
+            "feature_count": len(subject_vector),
+            "feature_ratio": feature_ratio,
+            "feature_blend": blend,
+        }
+    )
+    return result
+
+
+def ratio_stats_feature(
+    rows: list[sqlite3.Row],
+    row: sqlite3.Row,
+    horizon: int,
+    anchor_day: int,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    base_model = str(feature_model_config(config).get("base_model", "shrinkage_multiplier_v1"))
+    if base_model == "feature_multiplier_v1":
+        base_model = "shrinkage_multiplier_v1"
+    base_stats = ratio_stats_for_model(base_model, rows, row, horizon, anchor_day, config)
+    metric = metric_for_horizon(config, horizon)
+    minimum_samples = int(config.get("sync", {}).get("minimum_training_samples", 5))
+    selected_candidates: list[sqlite3.Row] = []
+    for _name, predicate in ratio_group_specs(row):
+        candidates = ratio_candidates(rows, row, horizon, anchor_day, config, predicate)
+        if len(candidates) >= minimum_samples:
+            selected_candidates = candidates
+            break
+    if not selected_candidates:
+        selected_candidates = ratio_candidates(rows, row, horizon, anchor_day, config, lambda _candidate: True)
+    return feature_weighted_ratio_stats(base_stats, selected_candidates, row, metric, anchor_day, config)
+
+
 def ratio_stats_for_model(
     model: str,
     rows: list[sqlite3.Row],
@@ -1100,6 +1275,8 @@ def ratio_stats_for_model(
         return ratio_stats(rows, row, horizon, anchor_day, config)
     if model == "shrinkage_multiplier_v1":
         return ratio_stats_shrinkage(rows, row, horizon, anchor_day, config)
+    if model == "feature_multiplier_v1":
+        return ratio_stats_feature(rows, row, horizon, anchor_day, config)
     raise ValueError(f"unknown model: {model}")
 
 
@@ -1843,7 +2020,7 @@ def mature_training_rows_at_decision(
 def backtest_models(config: dict[str, Any]) -> list[str]:
     configured = config.get("backtest", {}).get(
         "models",
-        ["baseline_multiplier_v1", "shrinkage_multiplier_v1"],
+        ["baseline_multiplier_v1", "shrinkage_multiplier_v1", "feature_multiplier_v1"],
     )
     models = [str(model) for model in configured]
     return models or ["baseline_multiplier_v1"]
@@ -1896,6 +2073,9 @@ def build_backtest_prediction_row(
     }
     if "leaf_sample_size" in stats:
         payload["leaf_sample_size"] = stats["leaf_sample_size"]
+    for key in ("feature_sample_size", "feature_count", "feature_ratio", "feature_blend"):
+        if key in stats:
+            payload[key] = stats[key]
     return payload
 
 
@@ -1965,12 +2145,12 @@ def backtest_rows(config: dict[str, Any], options: dict[str, Any] | None = None)
             actual = row_metric_value(row, metric) if age_days >= horizon else None
             if actual is None or actual <= 0:
                 continue
-            anchor = best_anchor(row, horizon, age_days, config)
-            if anchor is None:
-                continue
-            anchor_day, anchor_value = anchor
-            candidates = mature_training_rows_at_decision(training_rows, row, horizon, anchor_day)
             for model in models:
+                anchor = anchor_for_model(model, row, horizon, age_days, config)
+                if anchor is None:
+                    continue
+                anchor_day, anchor_value = anchor
+                candidates = mature_training_rows_at_decision(training_rows, row, horizon, anchor_day)
                 stats = ratio_stats_for_model(model, candidates, row, horizon, anchor_day, config)
                 if stats["sample_size"] < minimum_samples:
                     continue

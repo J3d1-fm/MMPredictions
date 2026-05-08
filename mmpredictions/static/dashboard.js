@@ -39,6 +39,7 @@ const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({
   "\"": "&quot;",
   "'": "&#39;"
 })[c]);
+const helpTip = text => `<span class="help-tip" tabindex="0" role="button" aria-label="Help" data-help="${esc(text)}">?</span>`;
 const sourceName = p => p.source_channel || p.partner_name || "unknown";
 const roasValue = p => Number(p.display_roas ?? p.predicted_roas ?? 0);
 const revenueValue = p => Number(p.display_revenue ?? p.predicted_revenue ?? (roasValue(p) * Number(p.cost || 0)));
@@ -856,21 +857,25 @@ function renderCohortContext() {
   document.getElementById("contextSummary").textContent = `${cohortStart} - ${cohortEnd}`;
   document.getElementById("cohortContext").innerHTML = `
     <div class="context-item">
+      <span class="context-help">${helpTip("The cohort window currently being evaluated. Cards and charts use the latest selected cohort in this window.")}</span>
       <span>Cohort window</span>
       <strong>${esc(cohortStart)} - ${esc(cohortEnd)}</strong>
       <small>${esc(scopeLabel(f.scope))} · ${campaignCount} campaigns · ${money(cost)}</small>
     </div>
     <div class="context-item">
+      <span class="context-help">${helpTip("The active traffic slice: platform, country, source, campaign, and campaign exclusions. Changing filters changes this slice.")}</span>
       <span>Traffic slice</span>
       <strong>${esc(filters.join(" · "))}</strong>
       <small>${sourceCount} sources in current result · ${allRows.length} horizon rows</small>
     </div>
     <div class="context-item">
+      <span class="context-help">${helpTip("Historical cohorts and model groups used for multiplier training. More relevant examples usually mean a more stable forecast.")}</span>
       <span>Prediction inputs</span>
       <strong>${state.cohort_weeks || 0} weekly training cohorts</strong>
       <small>${state.row_count || 0} paid training rows · anchors ${anchors.join(", ") || "n/a"} · groups ${groups.join(", ") || "n/a"}${scope.fallback ? ` · ${esc(dataScopeNote())}` : ""}</small>
     </div>
     <div class="context-item">
+      <span class="context-help">${helpTip("Actual means observed from the MMP. Proxy means a mapped replacement metric. Predicted means the model is forecasting a horizon that has not matured yet.")}</span>
       <span>Metric status</span>
       <strong>${actualCount} actual · ${proxyCount} proxy · ${predCount} predicted</strong>
       <small>Cards and charts use this selected latest cohort only</small>
@@ -1099,6 +1104,141 @@ function modelLabel(model) {
   return String(model || "").replace(/_v\d+$/, "").replace(/_/g, " ");
 }
 
+function backtestPairKey(row) {
+  return [
+    row.cohort_start,
+    row.cohort_end,
+    row.granularity,
+    row.platform,
+    row.country_code,
+    row.partner_name,
+    row.campaign_network,
+    row.campaign_id_network,
+    row.horizon
+  ].join("\u001f");
+}
+
+function bucketLabel(value, buckets) {
+  const number = Number(value || 0);
+  for (const bucket of buckets) {
+    if (number < bucket.limit) return bucket.label;
+  }
+  return buckets[buckets.length - 1].label;
+}
+
+function backtestSegmentLabel(row, dimension) {
+  if (dimension === "country") {
+    return row.country_code === "ZZ" ? (row.country || "All countries") : `${row.country || "Unknown"} (${row.country_code})`;
+  }
+  if (dimension === "platform") return row.platform || "Unknown platform";
+  if (dimension === "cohort_size") {
+    return bucketLabel(row.network_installs, [
+      {limit: 100, label: "<100 installs"},
+      {limit: 500, label: "100-499 installs"},
+      {limit: 2000, label: "500-1,999 installs"},
+      {limit: 10000, label: "2,000-9,999 installs"},
+      {limit: Infinity, label: "10,000+ installs"}
+    ]);
+  }
+  if (dimension === "spend") {
+    return bucketLabel(row.cost, [
+      {limit: 100, label: "<$100 spend"},
+      {limit: 500, label: "$100-499 spend"},
+      {limit: 2000, label: "$500-1,999 spend"},
+      {limit: 10000, label: "$2,000-9,999 spend"},
+      {limit: Infinity, label: "$10,000+ spend"}
+    ]);
+  }
+  return row.source_channel || row.partner_name || "Unknown source";
+}
+
+function backtestWeightedMape(rows) {
+  const denominator = rows.reduce((sum, row) => sum + Number(row.actual_roas || 0) * Number(row.cost || 0), 0);
+  const numerator = rows.reduce((sum, row) => {
+    return sum + Math.abs(Number(row.predicted_roas || 0) - Number(row.actual_roas || 0)) * Number(row.cost || 0);
+  }, 0);
+  return denominator > 0 ? numerator / denominator : null;
+}
+
+function backtestCoverage(rows) {
+  return rows.length ? rows.filter(row => row.covered).length / rows.length : null;
+}
+
+function pairedBacktestRows(payload, requiredModels) {
+  const grouped = new Map();
+  for (const row of payload.rows || []) {
+    const key = backtestPairKey(row);
+    const pair = grouped.get(key) || {};
+    pair[row.model] = row;
+    grouped.set(key, pair);
+  }
+  return [...grouped.values()].filter(pair => requiredModels.every(model => pair[model]));
+}
+
+function renderBacktestSegments(payload) {
+  const tbody = document.getElementById("backtestSegmentRows");
+  const selector = document.getElementById("backtestSegmentFilter");
+  if (!tbody || !selector) return;
+  const baselineModel = payload.baseline_model || "baseline_multiplier_v1";
+  const shrinkageModel = (payload.models || []).includes("shrinkage_multiplier_v1") ? "shrinkage_multiplier_v1" : null;
+  const featureModel = (payload.models || []).includes("feature_multiplier_v1") ? "feature_multiplier_v1" : null;
+  if (!featureModel) {
+    tbody.innerHTML = `<tr><td colspan="9" class="muted">Feature model is not present in this backtest artifact.</td></tr>`;
+    return;
+  }
+  const required = [baselineModel, featureModel];
+  if (shrinkageModel) required.push(shrinkageModel);
+  const pairs = pairedBacktestRows(payload, required);
+  const groups = new Map();
+  for (const pair of pairs) {
+    const baseline = pair[baselineModel];
+    const segment = backtestSegmentLabel(baseline, selector.value);
+    const group = groups.get(segment) || {segment, pairs: [], spend: 0};
+    group.pairs.push(pair);
+    group.spend += Number(baseline.cost || 0);
+    groups.set(segment, group);
+  }
+  const rows = [...groups.values()]
+    .map(group => {
+      const baselineRows = group.pairs.map(pair => pair[baselineModel]);
+      const shrinkageRows = shrinkageModel ? group.pairs.map(pair => pair[shrinkageModel]) : [];
+      const featureRows = group.pairs.map(pair => pair[featureModel]);
+      const baselineMape = backtestWeightedMape(baselineRows);
+      const featureMape = backtestWeightedMape(featureRows);
+      const wins = group.pairs.filter(pair => {
+        const base = pair[baselineModel];
+        const feature = pair[featureModel];
+        return Math.abs(Number(feature.predicted_roas || 0) - Number(feature.actual_roas || 0)) <
+          Math.abs(Number(base.predicted_roas || 0) - Number(base.actual_roas || 0));
+      }).length;
+      return {
+        ...group,
+        baselineMape,
+        shrinkageMape: shrinkageRows.length ? backtestWeightedMape(shrinkageRows) : null,
+        featureMape,
+        featureDelta: baselineMape == null || featureMape == null ? null : featureMape - baselineMape,
+        featureWins: group.pairs.length ? wins / group.pairs.length : null,
+        featureCoverage: backtestCoverage(featureRows)
+      };
+    })
+    .filter(row => row.pairs.length >= 5)
+    .sort((a, b) => b.spend - a.spend)
+    .slice(0, 50);
+  tbody.innerHTML = rows.length ? rows.map(row => `
+    <tr>
+      <td title="${esc(row.segment)}">${esc(row.segment)}</td>
+      <td class="num">${row.pairs.length.toLocaleString()}</td>
+      <td class="num">${money(row.spend)}</td>
+      <td class="num">${row.baselineMape == null ? "n/a" : pct(row.baselineMape)}</td>
+      <td class="num">${row.shrinkageMape == null ? "n/a" : pct(row.shrinkageMape)}</td>
+      <td class="num">${row.featureMape == null ? "n/a" : pct(row.featureMape)}</td>
+      <td class="num ${row.featureDelta != null && row.featureDelta < 0 ? "risk-low" : "risk-high"}">${row.featureDelta == null ? "n/a" : pct(row.featureDelta)}</td>
+      <td class="num">${row.featureWins == null ? "n/a" : pct(row.featureWins)}</td>
+      <td class="num">${row.featureCoverage == null ? "n/a" : pct(row.featureCoverage)}</td>
+    </tr>
+  `).join("") : `<tr><td colspan="9" class="muted">No paired segment rows for this grouping.</td></tr>`;
+}
+
 function summaryForModel(payload, model, horizon) {
   return (payload.summary_by_model_horizon?.[model] || {})[String(horizon)] ||
     (payload.summary_by_model_horizon?.[model] || {})[Number(horizon)] || {};
@@ -1112,6 +1252,7 @@ function comparisonForModel(payload, model, horizon) {
 function renderBacktestError(detail) {
   document.getElementById("backtestSummaryText").textContent = `Backtest error: ${detail}`;
   document.getElementById("backtestSummaryRows").innerHTML = "";
+  document.getElementById("backtestSegmentRows").innerHTML = "";
   document.getElementById("backtestRows").innerHTML = "";
   document.getElementById("backtestRowsSummary").textContent = "";
   document.getElementById("retentionBacktestSummaryText").textContent = "";
@@ -1151,6 +1292,7 @@ function renderBacktest() {
       <td class="num">${row.weighted_mape_delta == null ? "baseline" : pct(row.weighted_mape_delta)}</td>
     </tr>
   `).join("");
+  renderBacktestSegments(payload);
 
   const rows = (payload.rows || []).slice(0, 500);
   document.getElementById("backtestRowsSummary").textContent = `Showing ${rows.length} of ${(payload.rows || []).length} rows`;
@@ -1669,6 +1811,51 @@ function exportActiveTab(format) {
   downloadFile(filename, html, "application/vnd.ms-excel;charset=utf-8");
 }
 
+function initHelpTooltips() {
+  let tooltip = document.getElementById("helpTooltip");
+  if (!tooltip) {
+    tooltip = document.createElement("div");
+    tooltip.id = "helpTooltip";
+    tooltip.className = "help-tooltip";
+    tooltip.hidden = true;
+    document.body.appendChild(tooltip);
+  }
+  const place = target => {
+    const text = target?.dataset?.help;
+    if (!text) return;
+    tooltip.textContent = text;
+    tooltip.hidden = false;
+    const rect = target.getBoundingClientRect();
+    const tipRect = tooltip.getBoundingClientRect();
+    const gap = 10;
+    const left = Math.min(window.innerWidth - tipRect.width - 12, Math.max(12, rect.left + rect.width / 2 - tipRect.width / 2));
+    const above = rect.top - tipRect.height - gap;
+    const top = above > 12 ? above : Math.min(window.innerHeight - tipRect.height - 12, rect.bottom + gap);
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${Math.max(12, top)}px`;
+  };
+  const hide = () => { tooltip.hidden = true; };
+  document.addEventListener("mouseover", event => {
+    const target = event.target instanceof Element ? event.target.closest(".help-tip") : null;
+    if (target) place(target);
+  });
+  document.addEventListener("focusin", event => {
+    const target = event.target instanceof Element ? event.target.closest(".help-tip") : null;
+    if (target) place(target);
+  });
+  document.addEventListener("mouseout", event => {
+    if (event.target instanceof Element && event.target.closest(".help-tip")) hide();
+  });
+  document.addEventListener("focusout", event => {
+    if (event.target instanceof Element && event.target.closest(".help-tip")) hide();
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape") hide();
+  });
+  window.addEventListener("scroll", hide, {passive: true});
+  window.addEventListener("resize", hide);
+}
+
 document.getElementById("platformFilter").addEventListener("change", () => {
   for (const id of ["countryFilter", "partnerFilter", "campaignFilter"]) document.getElementById(id).value = "";
   page = 1;
@@ -1687,6 +1874,9 @@ for (const id of ["scopeFilter", "dateFrom", "dateTo"]) {
 
 document.querySelectorAll("[data-tab]").forEach(button => {
   button.addEventListener("click", () => setActiveTab(button.dataset.tab));
+});
+document.getElementById("backtestSegmentFilter").addEventListener("change", () => {
+  if (backtestState) renderBacktestSegments(backtestState);
 });
 document.getElementById("exportCsv").addEventListener("click", () => exportActiveTab("csv"));
 document.getElementById("exportXls").addEventListener("click", () => exportActiveTab("xls"));
@@ -1850,6 +2040,7 @@ document.querySelectorAll("th[data-sort]").forEach(th => {
 });
 
 initResizableColumns();
+initHelpTooltips();
 excludedCampaignSet = readCampaignExclusions();
 readPreferences();
 readHash();

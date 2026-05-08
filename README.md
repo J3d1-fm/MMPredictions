@@ -19,6 +19,7 @@ MMPredictions lets app teams connect their own MMP cohort API credentials, optio
 
 - `baseline_multiplier_v1`: historical cohort multiplier model.
 - `shrinkage_multiplier_v1`: hierarchical shrinkage multiplier benchmark.
+- `feature_multiplier_v1`: benchmark that weights historical cohorts by early revenue-event, payer, session, and ad-monetization similarity before applying multipliers.
 
 The baseline remains the default production engine. Use `/api/backtest` to compare predicted versus actual performance before switching model families.
 
@@ -68,6 +69,8 @@ Edit `config/mmpredictions.json` or use environment variables:
 - `MMPRED_ADMIN_EMAILS`: bootstrap dashboard admins when using IAP.
 - `MMPRED_IAP_RESOURCE`: IAP resource path for access-management UI.
 - `MMPRED_PROJECTS_PATH`: optional local project registry path when Cloud Storage is not enabled.
+
+The example config includes an `early_features_v1` metric pack. Keep it enabled when your MMP can return early event, payer, session, or ad-monetization cohort metrics; the feature model uses those fields only in backtests until you explicitly promote it.
 
 ## Multi-Project Connectors
 

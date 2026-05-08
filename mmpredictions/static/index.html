@@ -160,7 +160,7 @@
         <span id="backtestSummaryText" class="muted">Not loaded</span>
       </div>
       <div class="backtest-note muted">
-        Baseline remains the production prediction model. Shrinkage is shown here for benchmark comparison before rollout.
+        Baseline remains the production prediction model. Shrinkage and feature models are benchmark comparisons before rollout.
       </div>
       <div class="table-wrap">
         <table id="backtestSummaryTable">
@@ -179,6 +179,38 @@
             </tr>
           </thead>
           <tbody id="backtestSummaryRows"></tbody>
+        </table>
+      </div>
+      <div class="section-head sub-head">
+        <h2>Segment Stability <span class="help-tip" tabindex="0" role="button" aria-label="Segment stability help" data-help="Segment backtests show whether a candidate model is consistently better than baseline by source, country, platform, cohort size, or spend bucket. Rows are paired on the same cohort and horizon before comparison.">?</span></h2>
+        <label class="inline-control">
+          <span>Group by</span>
+          <select id="backtestSegmentFilter">
+            <option value="source">Source</option>
+            <option value="country">Country</option>
+            <option value="platform">Platform</option>
+            <option value="cohort_size">Cohort size</option>
+            <option value="spend">Spend bucket</option>
+          </select>
+        </label>
+      </div>
+      <div class="table-wrap">
+        <table id="backtestSegmentTable">
+          <caption>Backtest model quality by segment</caption>
+          <thead>
+            <tr>
+              <th scope="col">Segment</th>
+              <th class="num" scope="col">Rows</th>
+              <th class="num" scope="col">Weighted spend</th>
+              <th class="num" scope="col">Baseline WMAPE</th>
+              <th class="num" scope="col">Shrinkage WMAPE</th>
+              <th class="num" scope="col">Feature WMAPE</th>
+              <th class="num" scope="col">Feature delta</th>
+              <th class="num" scope="col">Feature wins</th>
+              <th class="num" scope="col">Feature coverage</th>
+            </tr>
+          </thead>
+          <tbody id="backtestSegmentRows"></tbody>
         </table>
       </div>
       <div class="section-head sub-head">
