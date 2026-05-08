@@ -12,7 +12,7 @@ let backtestState = null;
 let backtestPromise = null;
 const pageSize = 50;
 const descDefaultSortKeys = new Set(["cost", "quality", "network_installs"]);
-const defaultColumnWidths = [112, 88, 128, 138, 240, 112, 118, 118, 118, 118, 118, 128, 128, 128, 118, 164];
+const defaultColumnWidths = [112, 88, 128, 138, 220, 112, 118, 118, 118, 118, 118, 128, 128, 128, 118, 164];
 const overviewHorizons = [7, 30, 60, 90, 120, 180, 360, 540, 720];
 const summaryCachePrefix = "mmpredictions-summary-v3:";
 const preferencesKey = "mmpredictions-preferences-v1";
@@ -1459,15 +1459,37 @@ function rowHtml(row) {
 }
 
 function cardHtml(row) {
+  const confidence = Number(row.confidence || 0);
+  const quality = qualityClass(confidence);
   const metrics = overviewHorizons.map(horizon => {
     const p = row.horizons.get(horizon);
-    return `<div class="card-row"><span>H${horizon}</span><strong>${p ? pct(roasValue(p)) : "n/a"}</strong></div>`;
+    if (!p) {
+      return `<div class="mobile-horizon empty"><span>H${horizon}</span><strong>n/a</strong></div>`;
+    }
+    const badge = p.roas_source === "actual" ? "actual" : p.roas_source === "proxy" ? "proxy" : "pred";
+    const detail = badge === "actual"
+      ? "observed from MMP"
+      : `${pct(p.low_roas)} - ${pct(p.high_roas)}`;
+    return `<div class="mobile-horizon ${predictionQuality(p)}">
+      <span>H${horizon} <em>${badge}</em></span>
+      <strong>${pct(roasValue(p))}</strong>
+      <small>pLTV ${ltv(ltvValue(p))}</small>
+      <small>${detail}</small>
+    </div>`;
   }).join("");
-  return `<article class="card">
-    <strong>${esc(row.campaign)}</strong>
-    <div class="muted">${esc(row.platform)} · ${esc(row.country)} · ${esc(row.source)} · ${row.cohort_start}</div>
-    ${metrics}
-    <div class="card-row"><span>Cost</span><span>${money(row.cost)}</span></div>
+  return `<article class="card campaign-mobile-card">
+    <div class="mobile-card-head">
+      <div>
+        <strong>${esc(row.campaign)}</strong>
+        <div class="muted">${esc(row.source)} · ${esc(row.country)} · ${row.cohort_start}</div>
+      </div>
+      <span class="quality-pill ${quality}">${esc(qualityText(confidence))} ${Math.round(confidence * 100)}</span>
+    </div>
+    <div class="campaign-mobile-meta">
+      <span>${esc(row.platform)}</span>
+      <span>${money(row.cost)}</span>
+    </div>
+    <div class="campaign-mobile-metrics">${metrics}</div>
   </article>`;
 }
 
