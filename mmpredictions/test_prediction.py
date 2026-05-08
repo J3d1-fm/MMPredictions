@@ -686,6 +686,51 @@ class PredictionTest(unittest.TestCase):
         finally:
             engine.gcs_store.download_gzip_json = original  # type: ignore[assignment]
 
+    def test_compact_backtest_payload_limits_detail_rows_and_precomputes_segments(self) -> None:
+        rows = []
+        for index in range(6):
+            base = {
+                "cohort_start": f"2025-01-{index + 1:02d}",
+                "cohort_end": f"2025-01-{index + 1:02d}",
+                "granularity": "week",
+                "platform": "Android",
+                "country": "United States",
+                "country_code": "US",
+                "partner_name": "Facebook",
+                "source_channel": "Facebook",
+                "campaign_network": f"campaign-{index}",
+                "campaign_id_network": f"campaign-{index}",
+                "horizon": 30,
+                "actual_roas": 1.0,
+                "cost": 100 + index,
+                "network_installs": 1000,
+                "covered": True,
+            }
+            for model, predicted in (
+                ("baseline_multiplier_v1", 1.5),
+                ("shrinkage_multiplier_v1", 1.2),
+                ("feature_multiplier_v1", 1.1),
+            ):
+                rows.append({**base, "model": model, "predicted_roas": predicted})
+        payload = {
+            "model": "comparison_v1",
+            "baseline_model": "baseline_multiplier_v1",
+            "models": ["baseline_multiplier_v1", "shrinkage_multiplier_v1", "feature_multiplier_v1"],
+            "rows": rows,
+            "retention_rows": [{"row": index} for index in range(8)],
+        }
+
+        compact = engine.compact_backtest_payload(payload, row_limit=4, retention_row_limit=3)
+
+        self.assertTrue(compact["is_compact"])
+        self.assertEqual(compact["row_count"], 18)
+        self.assertEqual(len(compact["rows"]), 4)
+        self.assertEqual(compact["retention_row_count"], 8)
+        self.assertEqual(len(compact["retention_rows"]), 3)
+        self.assertEqual(compact["segment_summaries"]["source"][0]["segment"], "Facebook")
+        self.assertEqual(compact["segment_summaries"]["source"][0]["pairs"], 6)
+        self.assertLess(compact["segment_summaries"]["source"][0]["featureDelta"], 0)
+
     def test_daily_sync_refetches_existing_recent_cohort(self) -> None:
         old_db_path = os.environ.pop("MMPRED_DB_PATH", None)
         old_bucket = os.environ.pop("MMPRED_GCS_BUCKET", None)

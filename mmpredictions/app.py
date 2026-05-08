@@ -48,6 +48,9 @@ SYNC_STARTED_AT: str | None = None
 SUMMARY_LOCK = threading.Lock()
 SUMMARY_CACHE: dict[str, object] = {"payloads": {}}
 SUMMARY_TTL_SECONDS = 60.0
+BACKTEST_LOCK = threading.Lock()
+BACKTEST_CACHE: dict[str, object] = {"payloads": {}}
+BACKTEST_TTL_SECONDS = 300.0
 
 
 def json_bytes(payload: object, status: int = 200) -> tuple[int, bytes, str]:
@@ -419,6 +422,8 @@ def query_project_id(query: dict[str, list[str]]) -> str | None:
 def invalidate_summary_cache() -> None:
     with SUMMARY_LOCK:
         SUMMARY_CACHE["payloads"] = {}
+    with BACKTEST_LOCK:
+        BACKTEST_CACHE["payloads"] = {}
 
 
 def db_status(query: dict[str, list[str]] | None = None) -> dict[str, object]:
@@ -534,13 +539,50 @@ def summary_payload(query: dict[str, list[str]]) -> dict[str, object]:
         return payload
 
 
+def query_int(query: dict[str, list[str]], key: str, default: int, minimum: int = 0, maximum: int = 5000) -> int:
+    try:
+        value = int(query.get(key, [str(default)])[0])
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(maximum, value))
+
+
 def backtest_payload() -> dict[str, object]:
-    return backtest_payload_for_project(None)
+    return backtest_payload_for_project({}, None)
 
 
-def backtest_payload_for_project(project_id: str | None) -> dict[str, object]:
+def backtest_payload_for_project(query: dict[str, list[str]], project_id: str | None) -> dict[str, object]:
     cfg = project_config(project_id)
-    return engine.load_backtest_artifact(cfg) or engine.backtest(cfg)
+    full_details = query.get("details", ["0"])[0].lower() in {"1", "true", "yes", "full"}
+    cache_key = json.dumps(
+        {
+            "project_id": cfg.get("project", {}).get("id"),
+            "details": full_details,
+            "row_limit": query_int(query, "row_limit", 500),
+            "retention_row_limit": query_int(query, "retention_row_limit", 500),
+        },
+        sort_keys=True,
+    )
+    now = time.monotonic()
+    with BACKTEST_LOCK:
+        payloads = BACKTEST_CACHE.setdefault("payloads", {})
+        cached = payloads.get(cache_key) if isinstance(payloads, dict) else None
+        if cached and now - float(cached["created_at"]) < BACKTEST_TTL_SECONDS:
+            return cached["payload"]  # type: ignore[return-value]
+    payload = engine.load_backtest_artifact(cfg) or engine.backtest(cfg)
+    if full_details:
+        result = payload
+    else:
+        result = engine.compact_backtest_payload(
+            payload,
+            row_limit=query_int(query, "row_limit", 500),
+            retention_row_limit=query_int(query, "retention_row_limit", 500),
+        )
+    with BACKTEST_LOCK:
+        payloads = BACKTEST_CACHE.setdefault("payloads", {})
+        if isinstance(payloads, dict):
+            payloads[cache_key] = {"payload": result, "created_at": now}
+    return result
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -591,7 +633,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/backtest":
             try:
-                self.respond(*json_bytes(backtest_payload_for_project(query_project_id(query))))
+                self.respond(*json_bytes(backtest_payload_for_project(query, query_project_id(query))))
             except Exception as exc:  # noqa: BLE001 - surface operational failure.
                 self.respond(*json_bytes({"status": "error", "error": str(exc), "trace": traceback.format_exc()}, 500))
             return

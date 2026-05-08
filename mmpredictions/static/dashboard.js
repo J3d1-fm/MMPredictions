@@ -18,7 +18,7 @@ const summaryCachePrefix = "mmpredictions-summary-v3:";
 const preferencesKey = "mmpredictions-preferences-v1";
 const columnWidthsKey = "mmpredictions-column-widths-v2";
 const activeTabKey = "mmpredictions-active-tab-v1";
-const backtestCacheKey = "mmpredictions-backtest-v1";
+const backtestCacheKey = "mmpredictions-backtest-v2";
 const campaignExclusionsKey = "mmpredictions-campaign-exclusions-v1";
 const projectPreferenceKey = "mmpredictions-project-v1";
 const viewModePreferenceKey = "mmpredictions-view-mode-v1";
@@ -1214,6 +1214,23 @@ function renderBacktestSegments(payload) {
   const tbody = document.getElementById("backtestSegmentRows");
   const selector = document.getElementById("backtestSegmentFilter");
   if (!tbody || !selector) return;
+  const precomputed = payload.segment_summaries?.[selector.value];
+  if (precomputed) {
+    tbody.innerHTML = precomputed.length ? precomputed.map(row => `
+      <tr>
+        <td title="${esc(row.segment)}">${esc(row.segment)}</td>
+        <td class="num">${Number(row.pairs || 0).toLocaleString()}</td>
+        <td class="num">${money(row.spend)}</td>
+        <td class="num">${row.baselineMape == null ? "n/a" : pct(row.baselineMape)}</td>
+        <td class="num">${row.shrinkageMape == null ? "n/a" : pct(row.shrinkageMape)}</td>
+        <td class="num">${row.featureMape == null ? "n/a" : pct(row.featureMape)}</td>
+        <td class="num ${row.featureDelta != null && row.featureDelta < 0 ? "risk-low" : "risk-high"}">${row.featureDelta == null ? "n/a" : pct(row.featureDelta)}</td>
+        <td class="num">${row.featureWins == null ? "n/a" : pct(row.featureWins)}</td>
+        <td class="num">${row.featureCoverage == null ? "n/a" : pct(row.featureCoverage)}</td>
+      </tr>
+    `).join("") : `<tr><td colspan="9" class="muted">No paired segment rows for this grouping.</td></tr>`;
+    return;
+  }
   const baselineModel = payload.baseline_model || "baseline_multiplier_v1";
   const shrinkageModel = (payload.models || []).includes("shrinkage_multiplier_v1") ? "shrinkage_multiplier_v1" : null;
   const featureModel = (payload.models || []).includes("feature_multiplier_v1") ? "feature_multiplier_v1" : null;
@@ -1312,8 +1329,9 @@ function renderBacktest() {
       summaryRows.push({model, horizon, ...row, weighted_mape_delta: comp.weighted_mape_delta});
     }
   }
+  const rowCount = payload.row_count ?? (payload.rows || []).length;
   document.getElementById("backtestSummaryText").textContent =
-    `${(payload.rows || []).length} prediction rows · generated ${payload.generated_at || "n/a"}`;
+    `${Number(rowCount || 0).toLocaleString()} prediction rows · generated ${payload.generated_at || "n/a"}`;
   document.getElementById("backtestSummaryRows").innerHTML = summaryRows.map(row => `
     <tr>
       <td>${esc(modelLabel(row.model))}${row.model === payload.baseline_model ? " <span class=\"proxy-pill\">prod baseline</span>" : ""}</td>
@@ -1330,7 +1348,7 @@ function renderBacktest() {
   renderBacktestSegments(payload);
 
   const rows = (payload.rows || []).slice(0, 500);
-  document.getElementById("backtestRowsSummary").textContent = `Showing ${rows.length} of ${(payload.rows || []).length} rows`;
+  document.getElementById("backtestRowsSummary").textContent = `Showing ${rows.length} of ${Number(rowCount || 0).toLocaleString()} rows`;
   document.getElementById("backtestRows").innerHTML = rows.map(row => `
     <tr>
       <td>${esc(modelLabel(row.model))}</td>
@@ -1354,8 +1372,9 @@ function renderBacktest() {
     horizon,
     ...(retentionSummary[String(horizon)] || retentionSummary[horizon] || {})
   }));
+  const retentionRowCount = payload.retention_row_count ?? (payload.retention_rows || []).length;
   document.getElementById("retentionBacktestSummaryText").textContent =
-    `${(payload.retention_rows || []).length} retention prediction rows`;
+    `${Number(retentionRowCount || 0).toLocaleString()} retention prediction rows`;
   document.getElementById("retentionBacktestSummaryRows").innerHTML = retentionSummaryRows.map(row => `
     <tr>
       <td>${esc(modelLabel(payload.retention_model || "retention_multiplier_v1"))}</td>
@@ -1370,7 +1389,7 @@ function renderBacktest() {
   `).join("");
   const retentionRows = (payload.retention_rows || []).slice(0, 500);
   document.getElementById("retentionBacktestRowsSummary").textContent =
-    `Showing ${retentionRows.length} of ${(payload.retention_rows || []).length} rows`;
+    `Showing ${retentionRows.length} of ${Number(retentionRowCount || 0).toLocaleString()} rows`;
   document.getElementById("retentionBacktestRows").innerHTML = retentionRows.map(row => `
     <tr>
       <td>${esc(row.cohort_start)}<div class="cell-sub">${esc(row.cohort_end)}</div></td>
@@ -1398,7 +1417,7 @@ async function loadBacktest(force = false) {
   }
   backtestPromise = (async () => {
     document.getElementById("backtestSummaryText").textContent = "Loading backtest...";
-    const params = new URLSearchParams({project_id: selected().projectId || "default"});
+    const params = new URLSearchParams({project_id: selected().projectId || "default", compact: "1"});
     const res = await fetch(`/api/backtest?${params}`, {cache: "no-store"});
     const payload = await res.json();
     if (!res.ok) throw new Error(payload.error || "Backtest API error");

@@ -2271,6 +2271,123 @@ def backtest_comparison(summary_by_model: dict[str, dict[int, dict[str, Any]]], 
     return comparison
 
 
+def backtest_pair_key(row: dict[str, Any]) -> str:
+    return "\x1f".join(
+        str(row.get(key, ""))
+        for key in (
+            "cohort_start",
+            "cohort_end",
+            "granularity",
+            "platform",
+            "country_code",
+            "partner_name",
+            "campaign_network",
+            "campaign_id_network",
+            "horizon",
+        )
+    )
+
+
+def backtest_bucket_label(value: Any, buckets: list[tuple[float, str]]) -> str:
+    number = float(value or 0)
+    for limit, label in buckets:
+        if number < limit:
+            return label
+    return buckets[-1][1]
+
+
+def backtest_segment_label(row: dict[str, Any], dimension: str) -> str:
+    if dimension == "country":
+        return str(row.get("country") or "All countries") if row.get("country_code") == "ZZ" else f"{row.get('country') or 'Unknown'} ({row.get('country_code')})"
+    if dimension == "platform":
+        return str(row.get("platform") or "Unknown platform")
+    if dimension == "cohort_size":
+        return backtest_bucket_label(
+            row.get("network_installs"),
+            [
+                (100, "<100 installs"),
+                (500, "100-499 installs"),
+                (2000, "500-1,999 installs"),
+                (10000, "2,000-9,999 installs"),
+                (math.inf, "10,000+ installs"),
+            ],
+        )
+    if dimension == "spend":
+        return backtest_bucket_label(
+            row.get("cost"),
+            [
+                (100, "<$100 spend"),
+                (500, "$100-499 spend"),
+                (2000, "$500-1,999 spend"),
+                (10000, "$2,000-9,999 spend"),
+                (math.inf, "$10,000+ spend"),
+            ],
+        )
+    return str(row.get("source_channel") or row.get("partner_name") or "Unknown source")
+
+
+def backtest_weighted_mape(rows: list[dict[str, Any]]) -> float | None:
+    denominator = sum(float(row.get("actual_roas") or 0) * float(row.get("cost") or 0) for row in rows)
+    numerator = sum(abs(float(row.get("predicted_roas") or 0) - float(row.get("actual_roas") or 0)) * float(row.get("cost") or 0) for row in rows)
+    return numerator / denominator if denominator > 0 else None
+
+
+def backtest_coverage(rows: list[dict[str, Any]]) -> float | None:
+    return sum(1 for row in rows if row.get("covered")) / len(rows) if rows else None
+
+
+def backtest_segment_summaries(rows: list[dict[str, Any]], models: list[str], baseline: str) -> dict[str, list[dict[str, Any]]]:
+    feature_model = "feature_multiplier_v1" if "feature_multiplier_v1" in models else None
+    if not feature_model:
+        return {}
+    shrinkage_model = "shrinkage_multiplier_v1" if "shrinkage_multiplier_v1" in models else None
+    required = [baseline, feature_model] + ([shrinkage_model] if shrinkage_model else [])
+    grouped_pairs: dict[str, dict[str, dict[str, Any]]] = {}
+    for row in rows:
+        pair = grouped_pairs.setdefault(backtest_pair_key(row), {})
+        pair[str(row.get("model"))] = row
+    pairs = [pair for pair in grouped_pairs.values() if all(model and model in pair for model in required)]
+    summaries: dict[str, list[dict[str, Any]]] = {}
+    for dimension in ("source", "country", "platform", "cohort_size", "spend"):
+        groups: dict[str, dict[str, Any]] = {}
+        for pair in pairs:
+            base = pair[baseline]
+            segment = backtest_segment_label(base, dimension)
+            group = groups.setdefault(segment, {"segment": segment, "pairs": [], "spend": 0.0})
+            group["pairs"].append(pair)
+            group["spend"] += float(base.get("cost") or 0)
+        rows_out = []
+        for group in groups.values():
+            if len(group["pairs"]) < 5:
+                continue
+            baseline_rows = [pair[baseline] for pair in group["pairs"]]
+            feature_rows = [pair[feature_model] for pair in group["pairs"]]
+            shrinkage_rows = [pair[shrinkage_model] for pair in group["pairs"]] if shrinkage_model else []
+            baseline_mape = backtest_weighted_mape(baseline_rows)
+            feature_mape = backtest_weighted_mape(feature_rows)
+            wins = sum(
+                1
+                for pair in group["pairs"]
+                if abs(float(pair[feature_model].get("predicted_roas") or 0) - float(pair[feature_model].get("actual_roas") or 0))
+                < abs(float(pair[baseline].get("predicted_roas") or 0) - float(pair[baseline].get("actual_roas") or 0))
+            )
+            rows_out.append(
+                {
+                    "segment": group["segment"],
+                    "pairs": len(group["pairs"]),
+                    "spend": group["spend"],
+                    "baselineMape": baseline_mape,
+                    "shrinkageMape": backtest_weighted_mape(shrinkage_rows) if shrinkage_rows else None,
+                    "featureMape": feature_mape,
+                    "featureDelta": None if baseline_mape is None or feature_mape is None else feature_mape - baseline_mape,
+                    "featureWins": wins / len(group["pairs"]) if group["pairs"] else None,
+                    "featureCoverage": backtest_coverage(feature_rows),
+                }
+            )
+        summaries[dimension] = sorted(rows_out, key=lambda row: float(row["spend"] or 0), reverse=True)[:50]
+    return summaries
+
+
 def backtest(config: dict[str, Any], options: dict[str, Any] | None = None) -> dict[str, Any]:
     rows = backtest_rows(config, options)
     retention_rows = retention_backtest_rows(config, options)
@@ -2296,6 +2413,23 @@ def backtest(config: dict[str, Any], options: dict[str, Any] | None = None) -> d
         "retention_rows": retention_rows,
         "retention_summary_by_horizon": retention_summary,
     }
+
+
+def compact_backtest_payload(payload: dict[str, Any], row_limit: int = 500, retention_row_limit: int = 500) -> dict[str, Any]:
+    compact = dict(payload)
+    rows = list(payload.get("rows") or [])
+    retention_rows = list(payload.get("retention_rows") or [])
+    models = [str(model) for model in payload.get("models", [])]
+    baseline = str(payload.get("baseline_model") or payload.get("model") or (models[0] if models else "baseline_multiplier_v1"))
+    compact["row_count"] = len(rows)
+    compact["retention_row_count"] = len(retention_rows)
+    compact["rows"] = rows[: max(0, row_limit)]
+    compact["retention_rows"] = retention_rows[: max(0, retention_row_limit)]
+    compact["row_limit"] = row_limit
+    compact["retention_row_limit"] = retention_row_limit
+    compact["is_compact"] = True
+    compact["segment_summaries"] = payload.get("segment_summaries") or backtest_segment_summaries(rows, models, baseline)
+    return compact
 
 
 def recompute_summary_by_horizon(payload: dict[str, Any]) -> None:
