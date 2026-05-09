@@ -13,6 +13,7 @@ MMPredictions lets app teams connect their own MMP cohort API credentials, optio
 - Supports campaign/source/country/platform filters, campaign exclusions, CSV/XLS exports, and model backtests.
 - Lets admins manage multiple projects and connector metadata from the dashboard UI.
 - Persists compact dashboard artifacts so the UI reads small payloads instead of recomputing full history.
+- Keeps organic traffic as a separate pLTV / pRevenue card instead of calculating pROAS on zero spend.
 - Can run locally, in Docker, or on Google Cloud Run with IAP.
 
 ## Current Model Engines

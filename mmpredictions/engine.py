@@ -1415,6 +1415,8 @@ def row_value(row: sqlite3.Row | dict[str, Any], key: str) -> Any:
 def source_channel(partner_name: str | None) -> str:
     value = (partner_name or "unknown").strip()
     normalized = value.lower().replace("_", " ").replace("-", " ")
+    if normalized in {"organic", "unattributed", "unknown organic"} or "organic" in normalized:
+        return "Organic"
     if "google" in normalized or "adwords" in normalized or "admob" in normalized:
         return "Google Ads"
     if "facebook" in normalized or "meta" in normalized or normalized in {"fb", "fb ads"}:
@@ -1684,12 +1686,20 @@ def source_presence(config: dict[str, Any], db: sqlite3.Connection, options: dic
                 "cost": 0.0,
                 "rows": 0,
                 "campaigns": set(),
+                "installs": 0.0,
+                "network_installs": 0.0,
+                "revenue_d7": 0.0,
+                "revenue_d30": 0.0,
                 "cohort_start": None,
                 "cohort_end": None,
                 "excluded": source in excluded,
             },
         )
         item["cost"] += float(row["network_cost"] or 0)
+        item["installs"] += float(row["installs"] or 0)
+        item["network_installs"] += float(row["network_installs"] or 0)
+        item["revenue_d7"] += float(row["revenue_d7"] or 0)
+        item["revenue_d30"] += float(row["revenue_d30"] or 0)
         item["rows"] += 1
         item["campaigns"].add(row["campaign_network"])
         item["cohort_start"] = min([value for value in [item["cohort_start"], row["cohort_start"]] if value])
@@ -1699,11 +1709,34 @@ def source_presence(config: dict[str, Any], db: sqlite3.Connection, options: dic
     minimum_cost = float(config.get("sync", {}).get("minimum_cost", 20.0))
     for item in grouped.values():
         cost = float(item["cost"] or 0)
+        installs = float(item["network_installs"] or item["installs"] or 0)
         reason = "excluded" if item["excluded"] else "zero_spend" if cost <= 0 else "below_minimum_spend" if cost < minimum_cost else "paid"
+        organic_metrics = {}
+        if item["source"] == "Organic":
+            revenue_d7 = float(item["revenue_d7"] or 0)
+            raw_revenue_d30 = float(item["revenue_d30"] or 0)
+            revenue_d30 = max(raw_revenue_d30, revenue_d7)
+            organic_metrics = {
+                "7": {
+                    "revenue": revenue_d7,
+                    "ltv": revenue_d7 / installs if installs > 0 else None,
+                    "installs": installs,
+                    "source": "actual" if revenue_d7 > 0 else "unavailable",
+                },
+                "30": {
+                    "revenue": revenue_d30,
+                    "ltv": revenue_d30 / installs if installs > 0 else None,
+                    "installs": installs,
+                    "source": "actual" if raw_revenue_d30 >= revenue_d7 and raw_revenue_d30 > 0 else "D7 floor",
+                },
+            }
         sources.append(
             {
                 "source": item["source"],
                 "cost": cost,
+                "installs": float(item["installs"] or 0),
+                "network_installs": float(item["network_installs"] or 0),
+                "organic_metrics": organic_metrics,
                 "rows": int(item["rows"]),
                 "campaigns": len(item["campaigns"]),
                 "cohort_start": item["cohort_start"],

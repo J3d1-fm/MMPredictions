@@ -340,6 +340,51 @@ class PredictionTest(unittest.TestCase):
             if old_db_path is not None:
                 os.environ["MMPRED_DB_PATH"] = old_db_path
 
+    def test_organic_source_presence_exposes_revenue_ltv_contract(self) -> None:
+        old_db_path = os.environ.pop("MMPRED_DB_PATH", None)
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".sqlite3") as handle:
+                cfg = config(handle.name)
+                db = engine.connect(cfg)
+                engine.upsert_rows(
+                    db,
+                    [
+                        {
+                            "app": "MMPredictions Android",
+                            "country": "United States",
+                            "country_code": "US",
+                            "partner_name": "Organic",
+                            "campaign_network": "organic",
+                            "campaign_id_network": "organic",
+                            "installs": 200,
+                            "network_installs": 0,
+                            "network_cost": 0,
+                            "network_ecpi": 0,
+                            "roas_d7": 0.0,
+                            "roas_d30": 0.0,
+                            "revenue_d7": 80,
+                            "revenue_d30": 20,
+                        }
+                    ],
+                    dt.date(2026, 4, 6),
+                    dt.date(2026, 4, 12),
+                    "week",
+                )
+
+                presence = engine.source_presence(cfg, db, {"scope": "week", "platform": "Android"})
+                organic = next(row for row in presence["sources"] if row["source"] == "Organic")
+
+                self.assertEqual(organic["cost"], 0)
+                self.assertEqual(organic["installs"], 200)
+                self.assertEqual(organic["organic_metrics"]["7"]["revenue"], 80)
+                self.assertEqual(organic["organic_metrics"]["30"]["revenue"], 80)
+                self.assertEqual(organic["organic_metrics"]["30"]["source"], "D7 floor")
+                self.assertAlmostEqual(organic["organic_metrics"]["30"]["ltv"], 0.4)
+        finally:
+            engine.close_thread_connection()
+            if old_db_path is not None:
+                os.environ["MMPRED_DB_PATH"] = old_db_path
+
     def test_backtest_includes_retention_prediction_rows(self) -> None:
         old_db_path = os.environ.pop("MMPRED_DB_PATH", None)
         try:

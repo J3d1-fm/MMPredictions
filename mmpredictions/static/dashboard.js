@@ -33,6 +33,7 @@ const money = v => {
 };
 const ltv = v => v == null ? "n/a" : Number(v).toLocaleString(undefined, {style: "currency", currency: "USD", maximumFractionDigits: 3});
 const retentionPct = v => v == null ? "n/a" : `${(Number(v || 0) * 100).toFixed(1)}%`;
+const installsText = v => `${Number(v || 0).toLocaleString()} installs`;
 const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({
   "&": "&amp;",
   "<": "&lt;",
@@ -42,6 +43,7 @@ const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({
 })[c]);
 const helpTip = text => `<span class="help-tip" tabindex="0" role="button" aria-label="Help" data-help="${esc(text)}">?</span>`;
 const sourceName = p => p.source_channel || p.partner_name || "unknown";
+const isOrganicSource = source => String(source || "").trim().toLowerCase() === "organic";
 const roasValue = p => Number(p.display_roas ?? p.predicted_roas ?? 0);
 const revenueValue = p => Number(p.display_revenue ?? p.predicted_revenue ?? (roasValue(p) * Number(p.cost || 0)));
 const ltvValue = p => p.display_ltv ?? p.predicted_ltv;
@@ -798,8 +800,10 @@ function renderChannelOverview() {
     const horizons = new Map(aggregateByHorizon(latestRows).map(row => [Number(row.horizon), row]));
     const latestStart = latestRows[0] ? latestRows[0].cohort_start : "";
     const latestEnd = latestRows[0] ? latestRows[0].cohort_end : "";
-    const cost = [...horizons.values()][0]?.cost || rows.reduce((sum, p) => sum + Number(p.cost || 0), 0);
-    return {source, latestStart, latestEnd, cost, horizons, rows: latestRows.length, status: "paid"};
+    const firstHorizon = [...horizons.values()][0] || {};
+    const cost = firstHorizon.cost || rows.reduce((sum, p) => sum + Number(p.cost || 0), 0);
+    const installs = Number(firstHorizon.networkInstalls || 0);
+    return {source, latestStart, latestEnd, cost, installs, horizons, rows: latestRows.length, status: "paid"};
   }).sort((a, b) => b.cost - a.cost);
   const presentSources = sourcePresenceRows();
   const seen = new Set(channels.map(channel => channel.source));
@@ -811,19 +815,40 @@ function renderChannelOverview() {
       latestStart: source.cohort_start || state?.data_scope?.requested_start || "",
       latestEnd: source.cohort_end || state?.data_scope?.requested_end || "",
       cost: Number(source.cost || 0),
+      installs: Number(source.network_installs || source.installs || 0),
       horizons: new Map(),
       rows: Number(source.rows || 0),
       status: source.status || "zero_spend",
-      campaigns: Number(source.campaigns || 0)
+      campaigns: Number(source.campaigns || 0),
+      organicMetrics: source.organic_metrics || {}
     });
   }
-  channels.sort((a, b) => b.cost - a.cost || a.source.localeCompare(b.source));
+  channels.sort((a, b) => {
+    if (isOrganicSource(a.source) !== isOrganicSource(b.source)) return isOrganicSource(a.source) ? -1 : 1;
+    return b.cost - a.cost || a.source.localeCompare(b.source);
+  });
 
   const note = dataScopeNote();
   document.getElementById("overviewSummary").textContent = `${channels.length} sources${note ? ` · ${note}` : ""}`;
   document.getElementById("channelOverview").innerHTML = channels.map(channel => {
+    const organic = isOrganicSource(channel.source);
     const metrics = overviewHorizons.map(horizon => {
       const row = channel.horizons.get(horizon);
+      if (organic) {
+        const organicMetric = channel.organicMetrics?.[String(horizon)];
+        if (!row && !organicMetric) return `<div class="overview-metric muted"><span>D${horizon}</span><strong>n/a</strong></div>`;
+        const revenue = organicMetric ? Number(organicMetric.revenue || 0) : Number(row.revenue || 0);
+        const ltvValue = organicMetric ? organicMetric.ltv : row.predictedLtv;
+        const organicInstalls = organicMetric ? Number(organicMetric.installs || 0) : Number(row.networkInstalls || channel.installs || 0);
+        const sourceLabel = organicMetric?.source || (row.actualCount === row.count ? "actual" : "estimated");
+        const hasRevenue = revenue > 0 || Number(ltvValue || 0) > 0;
+        return `<div class="overview-metric organic-metric">
+          <span>D${horizon} <em>${sourceLabel}</em></span>
+          <strong>${hasRevenue ? ltv(ltvValue) : "n/a"}</strong>
+          <small>pRevenue ${hasRevenue ? money(revenue) : "n/a"}</small>
+          <small>${installsText(organicInstalls)}</small>
+        </div>`;
+      }
       if (!row) return `<div class="overview-metric muted"><span>D${horizon}</span><strong>n/a</strong></div>`;
       const source = row.actualCount === row.count ? "actual" : row.proxyCount === row.count ? "proxy" : row.actualCount > 0 || row.proxyCount > 0 ? "mixed" : "pred";
       const detail = source === "actual"
@@ -839,11 +864,14 @@ function renderChannelOverview() {
       channel.status === "below_minimum_spend" ? `Below ${money(state?.minimum_cost || 0)} minimum spend` :
       channel.status === "paid" ? "" : esc(channel.status || "");
     const action = channel.cost > 0 ? `<button type="button" class="secondary view-campaigns" data-source="${esc(channel.source)}">Campaigns</button>` : `<span class="proxy-pill">0 spend</span>`;
+    const subtitle = organic
+      ? `${esc(channel.latestStart)} - ${esc(channel.latestEnd)} · ${installsText(channel.installs)} · Organic pLTV / pRevenue`
+      : `${esc(channel.latestStart)} - ${esc(channel.latestEnd)} · ${money(channel.cost)}${status ? ` · ${status}` : ""}`;
     return `<article class="channel-card" data-source="${esc(channel.source)}">
       <div class="channel-head">
         <div>
           <button type="button" class="channel-source" data-source="${esc(channel.source)}">${esc(channel.source)}</button>
-          <div class="muted">${esc(channel.latestStart)} - ${esc(channel.latestEnd)} · ${money(channel.cost)}${status ? ` · ${status}` : ""}</div>
+          <div class="muted">${subtitle}</div>
         </div>
         ${action}
       </div>
