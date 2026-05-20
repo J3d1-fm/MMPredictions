@@ -5,6 +5,7 @@ let sortDir = "desc";
 let statusTimer = null;
 let latestSyncStamp = null;
 let loadPromise = null;
+const summaryMemoryCache = new Map();
 let accessState = null;
 let projectsState = {projects: [], active_project_id: "default"};
 let activeTab = "overview";
@@ -23,7 +24,12 @@ const campaignExclusionsKey = "mmpredictions-campaign-exclusions-v1";
 const projectPreferenceKey = "mmpredictions-project-v1";
 const viewModePreferenceKey = "mmpredictions-view-mode-v1";
 const summaryCacheMaxAgeMs = 24 * 60 * 60 * 1000;
+const summarySessionIdKey = "mmpredictions-session-id-v1";
+const summarySessionCacheDbName = "mmpredictions-session-cache-v1";
+const summarySessionCacheStoreName = "summary";
+const summarySessionCacheMaxEntries = 8;
 let excludedCampaignSet = new Set();
+let summarySessionCacheDbPromise = null;
 
 const pct = v => `${(Number(v || 0) * 100).toFixed(1)}%`;
 const money = v => {
@@ -91,6 +97,22 @@ function safeStorageGet(key) {
 function safeStorageSet(key, value) {
   try {
     localStorage.setItem(key, value);
+  } catch (_err) {
+    return;
+  }
+}
+
+function safeSessionStorageGet(key) {
+  try {
+    return sessionStorage.getItem(key);
+  } catch (_err) {
+    return null;
+  }
+}
+
+function safeSessionStorageSet(key, value) {
+  try {
+    sessionStorage.setItem(key, value);
   } catch (_err) {
     return;
   }
@@ -240,7 +262,7 @@ function readSummaryCache(key) {
   try {
     const cached = JSON.parse(raw);
     if (!cached.payload || Date.now() - Number(cached.savedAt || 0) > summaryCacheMaxAgeMs) return null;
-    return cached;
+    return {...cached, cacheSource: "local"};
   } catch (_err) {
     return null;
   }
@@ -248,6 +270,138 @@ function readSummaryCache(key) {
 
 function writeSummaryCache(key, payload) {
   safeStorageSet(key, JSON.stringify({savedAt: Date.now(), payload}));
+}
+
+function summarySessionId() {
+  let id = safeSessionStorageGet(summarySessionIdKey);
+  if (!id) {
+    id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    safeSessionStorageSet(summarySessionIdKey, id);
+  }
+  return id;
+}
+
+function validSummaryCacheRecord(record) {
+  return Boolean(
+    record &&
+    record.payload &&
+    Date.now() - Number(record.savedAt || 0) <= summaryCacheMaxAgeMs
+  );
+}
+
+function touchSummaryMemoryCache(key, payload, savedAt = Date.now()) {
+  summaryMemoryCache.delete(key);
+  summaryMemoryCache.set(key, {payload, savedAt, cacheSource: "session"});
+  while (summaryMemoryCache.size > summarySessionCacheMaxEntries) {
+    const oldestKey = summaryMemoryCache.keys().next().value;
+    summaryMemoryCache.delete(oldestKey);
+  }
+}
+
+function readSummaryMemoryCache(key) {
+  const cached = summaryMemoryCache.get(key);
+  if (!cached) return null;
+  if (!validSummaryCacheRecord(cached)) {
+    summaryMemoryCache.delete(key);
+    return null;
+  }
+  touchSummaryMemoryCache(key, cached.payload, Number(cached.savedAt || Date.now()));
+  return cached;
+}
+
+function openSummarySessionCacheDb() {
+  if (typeof indexedDB === "undefined") return Promise.resolve(null);
+  if (summarySessionCacheDbPromise) return summarySessionCacheDbPromise;
+  summarySessionCacheDbPromise = new Promise(resolve => {
+    const request = indexedDB.open(summarySessionCacheDbName, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      const store = db.objectStoreNames.contains(summarySessionCacheStoreName)
+        ? request.transaction.objectStore(summarySessionCacheStoreName)
+        : db.createObjectStore(summarySessionCacheStoreName, {keyPath: "id"});
+      if (!store.indexNames.contains("sessionId")) store.createIndex("sessionId", "sessionId", {unique: false});
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => resolve(null);
+    request.onblocked = () => resolve(null);
+  });
+  return summarySessionCacheDbPromise;
+}
+
+function summarySessionRecordId(cacheKey) {
+  return `${summarySessionId()}:${cacheKey}`;
+}
+
+async function readSummarySessionCache(cacheKey) {
+  const cached = readSummaryMemoryCache(cacheKey);
+  if (cached) return cached;
+  const db = await openSummarySessionCacheDb();
+  if (!db) return null;
+  const id = summarySessionRecordId(cacheKey);
+  return new Promise(resolve => {
+    const transaction = db.transaction(summarySessionCacheStoreName, "readonly");
+    const request = transaction.objectStore(summarySessionCacheStoreName).get(id);
+    request.onsuccess = () => {
+      const record = request.result;
+      if (!validSummaryCacheRecord(record)) {
+        resolve(null);
+        return;
+      }
+      touchSummaryMemoryCache(cacheKey, record.payload, Number(record.savedAt || Date.now()));
+      resolve({payload: record.payload, savedAt: record.savedAt, cacheSource: "session"});
+    };
+    request.onerror = () => resolve(null);
+  });
+}
+
+function pruneSummarySessionCache(db, sessionId) {
+  const transaction = db.transaction(summarySessionCacheStoreName, "readwrite");
+  const store = transaction.objectStore(summarySessionCacheStoreName);
+  const request = store.getAll();
+  request.onsuccess = () => {
+    const now = Date.now();
+    const currentSession = [];
+    for (const record of request.result || []) {
+      if (!record || now - Number(record.savedAt || 0) > summaryCacheMaxAgeMs) {
+        store.delete(record.id);
+      } else if (record.sessionId === sessionId) {
+        currentSession.push(record);
+      }
+    }
+    currentSession
+      .sort((a, b) => Number(b.savedAt || 0) - Number(a.savedAt || 0))
+      .slice(summarySessionCacheMaxEntries)
+      .forEach(record => store.delete(record.id));
+  };
+}
+
+function writeSummarySessionCache(cacheKey, payload) {
+  const savedAt = Date.now();
+  const sessionId = summarySessionId();
+  touchSummaryMemoryCache(cacheKey, payload, savedAt);
+  openSummarySessionCacheDb().then(db => {
+    if (!db) return;
+    const transaction = db.transaction(summarySessionCacheStoreName, "readwrite");
+    transaction.objectStore(summarySessionCacheStoreName).put({
+      id: `${sessionId}:${cacheKey}`,
+      sessionId,
+      cacheKey,
+      savedAt,
+      payload
+    });
+    transaction.oncomplete = () => pruneSummarySessionCache(db, sessionId);
+  }).catch(() => {});
+}
+
+async function readCachedSummary(cacheKey) {
+  const memoryCached = readSummaryMemoryCache(cacheKey);
+  if (memoryCached) return memoryCached;
+  const localCached = readSummaryCache(cacheKey);
+  if (localCached) {
+    touchSummaryMemoryCache(cacheKey, localCached.payload, Number(localCached.savedAt || Date.now()));
+    return localCached;
+  }
+  return readSummarySessionCache(cacheKey);
 }
 
 function readBacktestCache() {
@@ -1668,23 +1822,25 @@ async function load(force = false) {
   if (loadPromise) return loadPromise;
   const params = summaryParams();
   const cacheKey = summaryCacheKey(params);
-  const cached = force ? null : readSummaryCache(cacheKey);
-  if (cached) {
-    state = cached.payload;
-    render();
-    const syncStatus = document.getElementById("syncStatus");
-    syncStatus.textContent = `${syncStatus.textContent} · cached`;
-    return;
-  }
   loadPromise = (async () => {
-    setView("loading");
-    document.getElementById("syncStatus").textContent = "Loading dashboard data...";
+    const cached = force ? null : await readCachedSummary(cacheKey);
+    if (cached) {
+      state = cached.payload;
+      render();
+      const syncStatus = document.getElementById("syncStatus");
+      const suffix = cached.cacheSource === "session" ? "session cached" : "cached";
+      syncStatus.textContent = `${syncStatus.textContent} · ${suffix}`;
+      return;
+    }
     try {
+      setView("loading");
+      document.getElementById("syncStatus").textContent = "Loading dashboard data...";
       const res = await fetch(`/api/summary?${params}`, {cache: "no-store"});
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.error || "API error");
       state = payload;
       writeSummaryCache(cacheKey, payload);
+      writeSummarySessionCache(cacheKey, payload);
       render();
     } catch (err) {
       throw err;

@@ -586,7 +586,7 @@ def backtest_payload_for_project(query: dict[str, list[str]], project_id: str | 
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "MMPredictions/1.0"
+    server_version = "MMPredictions/1.1"
 
     def do_HEAD(self) -> None:  # noqa: N802 - stdlib handler naming.
         parsed = urlparse(self.path)

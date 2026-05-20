@@ -1,0 +1,52 @@
+MMPredictions Technical Documentation
+Version: 2026.05.20-session-summary-cache
+Date: 2026-05-20
+
+Purpose
+MMPredictions serves pROAS, pLTV, pRetention, confidence, backtest, and campaign
+drilldown views from MMP cohort data. Dashboard reads should stay on compact
+artifacts or cached summary payloads where possible; UI navigation should not
+recompute expensive summaries unless the selected data scope has not been
+loaded yet or the user explicitly refreshes.
+
+Browser Session Summary Cache
+The dashboard now uses three browser-side cache layers for `/api/summary`:
+
+1. In-memory LRU cache
+   - Lives only inside the current page runtime.
+   - Holds the most recent 8 summary payloads.
+   - Serves immediate tab/filter re-renders without storage serialization.
+
+2. IndexedDB session cache
+   - Uses database `mmpredictions-session-cache-v1` and store `summary`.
+   - Records are keyed by a session id stored in `sessionStorage` plus the
+     normalized summary cache key.
+   - Keeps large payloads that may exceed `localStorage` quota.
+   - Prunes expired records and keeps at most 8 records for the active session.
+
+3. Existing localStorage cache
+   - Remains the compatibility path for smaller payloads.
+   - Still uses a 24-hour max age.
+
+The summary cache key excludes `seed` and includes the selected project, scope,
+custom date range, and platform. Country/source/campaign filters are rendered
+client-side from the loaded payload and do not require a new summary request.
+
+Manual Refresh
+The Refresh button still calls `load(true)`, which bypasses browser summary
+caches and requests `/api/summary` from the backend. This preserves the operator
+expectation that Refresh means fresh dashboard data.
+
+Serving Boundary
+This change is frontend cache policy only. It does not change:
+- MMP ingestion contracts.
+- SQLite schema.
+- Cloud Storage snapshot or artifact paths.
+- Prediction, retention, confidence, or backtest formulas.
+- Access roles or IAP behavior.
+- Sync scheduler cadence.
+
+Versioning
+- Dashboard badge: `v0.8`.
+- HTTP server version: `MMPredictions/1.1`.
+- Static asset cache-bust token: `20260520-session-cache`.

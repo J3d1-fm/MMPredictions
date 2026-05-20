@@ -1,0 +1,25 @@
+MMPredictions changelog
+
+Version 2026.05.20-session-summary-cache
+Date: 2026-05-20
+
+Changed
+- Bumped the HTTP server version to `MMPredictions/1.1` and the visible dashboard badge to `v0.8`.
+- Added a browser session summary cache for `/api/summary` payloads.
+- The dashboard now keeps recently loaded summary payloads in an in-memory LRU cache and an IndexedDB session cache keyed by the current browser session and selected project/scope/platform.
+- Filter and tab switching can reuse the already loaded payload without a new API request when the scope was loaded earlier in the same browser session.
+- Manual Refresh still bypasses the browser cache and requests fresh data from the API.
+- Kept the existing 24-hour `localStorage` cache as a fallback for smaller payloads and older browser paths.
+- Busted static asset cache with `v=20260520-session-cache`.
+
+Why
+- Large pROAS summary responses can exceed `localStorage` browser quota and silently fail to persist.
+- When that happens, users who switch between dashboard scopes or come back to the same scope in one browser session can trigger repeated heavy `/api/summary` requests.
+- The session cache keeps that workflow fast without changing ingestion, model formulas, access control, or Cloud Storage artifacts.
+
+Validation
+- Added a frontend contract test that checks the session-cache code path and static cache-bust version.
+- Ran `python3 -m py_compile mmpredictions/app.py`.
+- Ran `node --check mmpredictions/static/dashboard.js`.
+- Ran `python3 -m unittest mmpredictions.test_handler -v`.
+- Ran `python3 -m unittest discover mmpredictions -v` (53 tests; existing SQLite `ResourceWarning` noise remains non-blocking).
