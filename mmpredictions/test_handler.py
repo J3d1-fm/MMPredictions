@@ -1,5 +1,6 @@
 import json
 import os
+from pathlib import Path
 import tempfile
 import threading
 import unittest
@@ -8,6 +9,9 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 
 from mmpredictions import app, engine
+
+
+PACKAGE_DIR = Path(__file__).resolve().parent
 
 
 class HandlerTest(unittest.TestCase):
@@ -79,6 +83,18 @@ class HandlerTest(unittest.TestCase):
         self.assertEqual(payload["active_project_id"], "default")
         self.assertEqual(payload["projects"][0]["id"], "default")
         self.assertIn("mmp_api_token_env", payload["projects"][0])
+
+    def test_frontend_has_session_summary_cache(self) -> None:
+        script = (PACKAGE_DIR / "static" / "dashboard.js").read_text(encoding="utf-8")
+        html = (PACKAGE_DIR / "static" / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn("const summaryMemoryCache = new Map();", script)
+        self.assertIn('const summarySessionCacheDbName = "mmpredictions-session-cache-v1";', script)
+        self.assertIn("async function readCachedSummary(cacheKey)", script)
+        self.assertIn("writeSummarySessionCache(cacheKey, payload);", script)
+        self.assertIn('cached.cacheSource === "session" ? "session cached" : "cached"', script)
+        self.assertIn("20260520-session-cache", html)
+        self.assertIn(">v0.8</span>", html)
 
     def test_admin_can_save_project_connector(self) -> None:
         old_admins = app.ADMIN_EMAILS
